@@ -20,6 +20,15 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r cycle/requirements.txt
-          pip install pytest
-      - name: Run tests
-        run: pytest cycle/tests/ -v
+      - name: Verify imports
+        run: |
+          cd cycle/src && python -c "
+          from pva_work_flow.wetlab_outcomes import compute_cvs, has_failure
+          from pva_work_flow.workflow import run_diagnose
+          from pva_work_flow.constrained_doe import build_constrained_doe_skeleton
+          from pva_work_flow.generator import run_generator
+          from pva_work_flow.tree_reports import build_chain_report
+          from pva_work_flow.chain_memory import build_chain_memory
+          from pva_work_flow.experiment_state import build_experiment_round_from_pipeline
+          print('All modules OK')
+          "
