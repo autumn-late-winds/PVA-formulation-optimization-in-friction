@@ -1,0 +1,41 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.venv/
+venv/
+env/
+.env
+*.log
+
+# Local agent/editor state
+.claude/
+
+# Local experiment outputs and generated artifacts
+cycle/src/sft_qwen3_14b_out/
+cycle/src/**/sft_*_out/
+smoke_test_runs/
+
+# Local databases and large research assets
+数据库/
+ppt/
+question/
+
+# Raw / temporary scientific data
+*.sqlite
+*.db
+*.pkl
+*.pt
+*.pth
+*.npy
+*.npz

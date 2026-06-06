@@ -1,0 +1,187 @@
+1. R3-01 18% PVA / PDBA / DMSO / Glycerol Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+Glycerol: 1.00 g
+Deionized water: 14.00 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO, then add PDBA, and stir at room temperature to 50 °C to obtain a uniform solution or dispersion as much as possible.
+Cool the main PVA solution to 55 to 60 °C.
+Add glycerol and stir for 3 to 5 min.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 1 freeze thaw cycle, namely freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 24 h before testing.
+
+Intended Use
+
+This formulation is used to examine whether glycerol can further improve flexibility and interfacial lubrication on the basis of PDBA dynamic crosslinking.
+
+2. R3-02 18% PVA / PDBA / DMSO Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+Deionized water: 15.00 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO and PDBA, and stir at room temperature to 50 °C until uniform.
+Cool the main PVA solution to 55 to 60 °C.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 2 freeze thaw cycles, with each cycle consisting of freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 48 h before testing.
+
+Intended Use
+
+This formulation is used to evaluate gel formation and mechanical stability of the PDBA system under 2 freeze thaw cycles without additional additives.
+
+3. R3-03 18% PVA / PDBA / DMSO / PEGDA Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+PEGDA: 0.40 g
+Deionized water: 14.60 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO and PDBA, and stir at room temperature to 50 °C until uniform.
+Cool the main PVA solution to 55 to 60 °C.
+Add PEGDA and stir for 3 to 5 min.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 3 freeze thaw cycles, with each cycle consisting of freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 72 h before testing.
+
+Intended Use
+
+This formulation is used to examine whether PEGDA can help improve network integrity and load bearing capacity on the basis of PDBA dynamic crosslinking.
+
+4. R3-04 18% PVA / PDBA / DMSO Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+Deionized water: 15.00 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO and PDBA, and stir at room temperature to 50 °C until uniform.
+Cool the main PVA solution to 55 to 60 °C.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 1 freeze thaw cycle, namely freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 24 h before testing.
+
+Intended Use
+
+This is the basic additive free control group for the PDBA system.
+
+5. R3-05 18% PVA / PDBA / DMSO Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+Deionized water: 15.00 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO and PDBA, and stir at room temperature to 50 °C until uniform.
+Cool the main PVA solution to 55 to 60 °C.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 2 freeze thaw cycles, with each cycle consisting of freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 48 h before testing.
+
+Intended Use
+
+This formulation is used as a repeat condition to evaluate the stability of the 18% PVA / PDBA system under intermediate freeze thaw treatment and intermediate soaking duration.
+
+6. R3-06 18% PVA / PDBA / DMSO Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+Deionized water: 15.00 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO and PDBA, and stir at room temperature to 50 °C until uniform.
+Cool the main PVA solution to 55 to 60 °C.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 1 freeze thaw cycle, namely freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 72 h before testing.
+
+Intended Use
+
+This formulation is used to examine the effect of prolonged hydration on the uniformity of the PDBA crosslinked network and interfacial lubrication.
+
+7. R3-07 18% PVA / PDBA / DMSO Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+Deionized water: 15.00 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO and PDBA, and stir at room temperature to 50 °C until uniform.
+Cool the main PVA solution to 55 to 60 °C.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 3 freeze thaw cycles, with each cycle consisting of freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 24 h before testing.
+
+Intended Use
+
+This formulation is used to examine whether increasing the number of freeze thaw cycles can provide higher network strength in the PDBA system, while possibly introducing higher stiffness at the same time.
+
+8. R3-08 18% PVA / PDBA / DMSO Formulation
+Material Composition, 20.00 g
+
+Polyvinyl alcohol, PVA: 3.60 g
+1,4-benzenediboronic acid, PDBA: 0.20 g
+Dimethyl sulfoxide, DMSO: 1.20 g
+Deionized water: 15.00 g
+
+Preparation Procedure
+
+Add deionized water to a beaker, then add PVA.
+Stir at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+In a separate small beaker, add DMSO and PDBA, and stir at room temperature to 50 °C until uniform.
+Cool the main PVA solution to 55 to 60 °C.
+Slowly add the PDBA / DMSO solution and continue stirring for 5 min.
+Pour into a mold and briefly degas if necessary.
+Perform 2 freeze thaw cycles, with each cycle consisting of freezing at -20 °C for 12 h and thawing at 25 °C for 12 h.
+After demolding, soak in deionized water for 72 h before testing.
+
+Intended Use
+
+This formulation is used to examine the frictional stability and network retention capability of the PDBA system under an intermediate number of freeze thaw cycles combined with prolonged hydration.

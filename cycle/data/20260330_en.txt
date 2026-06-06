@@ -1,0 +1,157 @@
+1. R2-01 PVA/Sodium Hyaluronate Chemical Crosslinking Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Sodium hyaluronate: 0.05 g
+Deionized water: 8.625 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+First, take about 0.5 g of the total deionized water for this group to pre-wet the sodium hyaluronate, and let it stand at room temperature for 20 to 30 min.
+Add the remaining deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C, then add the pre-wetted sodium hyaluronate and continue stirring for 10 min.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group is a sodium hyaluronate modified system designed to evaluate the effects of sodium hyaluronate on water retention and lubrication performance.
+
+2. R2-02 Pure PVA Chemical Crosslinking Baseline Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Deionized water: 8.675 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+No additive pretreatment is required for this group.
+Add deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group serves as the pure PVA control in the second round and is used for comparison with the additive modified systems.
+
+3. R2-03 PVA/Sodium Hyaluronate Chemical Crosslinking Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Sodium hyaluronate: 0.05 g
+Deionized water: 8.625 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+First, take about 0.5 g of the total deionized water for this group to pre-wet the sodium hyaluronate, and let it stand at room temperature for 20 to 30 min.
+Add the remaining deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C, then add the pre-wetted sodium hyaluronate and continue stirring for 10 min.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group is also a sodium hyaluronate modified system and is intended for comparison with other sodium hyaluronate groups under different processing conditions.
+
+4. R2-04 PVA/Carboxymethyl Cellulose Sodium Chemical Crosslinking Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Sodium carboxymethyl cellulose, CMC: 0.10 g
+Deionized water: 8.575 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+First, take about 0.8 g of the total deionized water for this group to disperse the CMC, and let it stand at room temperature for 20 to 30 min.
+Add the remaining deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C, then add the pre-dispersed CMC suspension and continue stirring for 10 min.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group is a CMC modified system designed to evaluate the effects of CMC on viscosity, water retention, and surface stability.
+
+5. R2-05 PVA/DMSO Chemical Crosslinking Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Dimethyl sulfoxide, DMSO: 1.00 g
+Deionized water: 7.675 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+First, pre-mix the DMSO with about 1.0 g of deionized water.
+Add the remaining deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C, then add the DMSO premix and continue stirring for 10 min.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group is a DMSO modified system intended to evaluate the effect of DMSO as a co-solvent on network formation and final material properties.
+
+6. R2-06 Pure PVA Chemical Crosslinking Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Deionized water: 8.675 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+No additive pretreatment is required for this group.
+Add deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group is a pure PVA system used as another baseline control and to evaluate the influence of freeze-thaw treatment on the base network.
+
+7. R2-07 PVA/Sodium Hyaluronate Chemical Crosslinking Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Sodium hyaluronate: 0.05 g
+Deionized water: 8.625 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+First, take about 0.5 g of the total deionized water for this group to pre-wet the sodium hyaluronate, and let it stand at room temperature for 20 to 30 min.
+Add the remaining deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C, then add the pre-wetted sodium hyaluronate and continue stirring for 10 min.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group is a sodium hyaluronate modified system used to further compare the effects of sodium hyaluronate on lubrication and stability under different physical processing conditions.
+
+8. R2-08 PVA/Carboxymethyl Cellulose Sodium Chemical Crosslinking Formulation
+Composition, 10.00 g
+Poly(vinyl alcohol) PVA: 1.20 g
+Sodium carboxymethyl cellulose, CMC: 0.10 g
+Deionized water: 8.575 g
+50 wt% glutaraldehyde solution: 0.10 g
+Concentrated hydrochloric acid, 36% to 38%: 0.025 g
+Preparation Procedure
+First, take about 0.8 g of the total deionized water for this group to disperse the CMC, and let it stand at room temperature for 20 to 30 min.
+Add the remaining deionized water to a beaker, then add 1.20 g PVA, and heat with stirring at 90 to 95 °C for 2.5 to 3 h until the solution becomes completely transparent.
+Cool the system to 55 to 60 °C, then add the pre-dispersed CMC suspension and continue stirring for 10 min.
+Add 0.10 g of 50 wt% glutaraldehyde solution and stir for 1 min.
+Add 0.025 g of concentrated hydrochloric acid, stir rapidly for 20 to 30 s, and immediately cast into a mold.
+Place the sample at 50 °C for 2 h to complete the basic chemical crosslinking.
+Perform freeze-thaw treatment according to the setting for this group.
+For post-treatment, first rinse quickly with deionized water for 5 to 10 min, then equilibrate in fresh deionized water for 1 h before direct testing.
+Formulation Purpose
+
+This group is a CMC modified system used to compare with other CMC groups and with the pure PVA group, with the aim of evaluating its effects on surface stability and resistance to softening.

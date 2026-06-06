@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "pva-post-process"
+version = "0.1.0"
+description = "LLM-driven closed-loop experimental design for PVA hydrogel friction materials"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.21",
+    "matplotlib>=3.5",
+    "pyyaml>=6.0",
+    "openai>=1.0",
+]
+
+[project.optional-dependencies]
+local = ["transformers>=4.40", "torch>=2.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

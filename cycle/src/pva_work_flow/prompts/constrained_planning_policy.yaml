@@ -1,0 +1,117 @@
+# Constrained planning policy — single source of truth for experimental design rules.
+#
+# This YAML is the canonical definition of all hard constraints, design-type
+# rules, and stage thresholds.  Code (candidate_rules.py, rule_checker.py,
+# constrained_doe.py, budget_manager.py) reads from here or mirrors these
+# values.  Documentation and prompts should reference the same numbers.
+#
+# When you change a rule, update this file first, then regenerate derived
+# artefacts (prompt snippets, doc tables) from it.
+
+# ---- Candidate caps ----
+max_candidates_default: 6
+max_candidates_absolute: 8
+
+# ---- Limited exploration ----
+limited_exploration:
+  enabled_by_default: false
+  max_per_round: 1
+  max_new_materials: 1
+  max_fraction_of_total: 0.25      # of the 100-experiment budget
+  max_absolute: 25
+
+# ---- Design-type variable-change limits ----
+design_types:
+  baseline_reproduction:
+    max_changed_variables: 0       # must be exact copy
+    required_per_round: 1
+  single_factor_perturbation:
+    exact_changed_variables: 1     # exactly 1
+  local_optimization:
+    max_changed_variables: 2
+    min_fraction_per_round: 0.4    # at least 40% of round
+  failure_verification:
+    max_changed_variables: 1
+    max_per_round: 1
+  limited_exploration:
+    max_changed_variables: 1       # new material OR new process
+    max_per_round: 1
+
+# ---- Semantic change detection ----
+semantic_change_detection:
+  include:                         # compared between parent and child
+    - formulation.pva_wt_percent
+    - formulation.network_type
+    - formulation.crosslink_or_phys_method
+    - formulation.crosslinker.name
+    - formulation.crosslinker.wt_percent
+    - formulation.initiator_or_catalyst.name
+    - formulation.initiator_or_catalyst.wt_percent
+    - formulation.photo_initiator.name
+    - formulation.photo_initiator.wt_percent
+    - formulation.nanofiller.name
+    - formulation.nanofiller.wt_percent
+    - formulation.additives
+    - processing.freeze_thaw_cycles
+    - processing.post_soak_hours
+    - processing.cycle_hours
+    - processing.curing_temperature_C
+    - processing.curing_time_hours
+  exclude:                         # derived by ratio_planner, not design choices
+    - material.amount
+    - material.unit
+    - material.basis
+
+# ---- Black-box jump scoring ----
+black_box_jump:
+  reject_threshold: 4              # >=4 is auto-rejected
+  review_threshold: 2              # 2-3 needs human review
+  scores:
+    missing_parent_id: 2
+    missing_pva: 4
+    each_extra_variable_above_2: 1
+    new_material_outside_exploration: 2
+    each_new_material: 1
+    baseline_with_changes: 3
+    audit_conflation: 2
+
+# ---- PVA main-system constraint ----
+pva_system:
+  required: true
+  allow_override: false            # human must explicitly toggle
+
+# ---- Failure-type separation ----
+failure_separation:
+  audit_status_values: [passed, FAIL]
+  experimental_status_values: [not_measured, measured, measured_without_cof, experimental_failed]
+  rule: "audit failure != experimental failure"
+
+# ---- Budget and stages ----
+budget:
+  total_formula_budget: 100
+  max_formulas_per_round: 8
+  min_replicates_for_best: 3
+  stage_thresholds:
+    screening:              [0, 20]
+    local_optimization:     [20, 50]
+    mechanism_validation:   [50, 75]
+    robustness_validation:  [75, 101]
+
+# ---- Mandatory fields per candidate ----
+mandatory_fields:
+  - if_better
+  - if_worse
+  - expected_mechanism       # at least 1 entry
+  - risks_and_mitigations    # at least 2 entries
+  - parent_candidate_id      # R2+ only
+
+# ---- Inheritance table (per-round output) ----
+inheritance_table:
+  required_columns:
+    - candidate_id
+    - parent_candidate_id
+    - design_type
+    - changed_variables
+    - if_better
+    - if_worse
+    - black_box_jump_score

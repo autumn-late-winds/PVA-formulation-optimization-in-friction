@@ -1,0 +1,65 @@
+# Experiment observation error codes.
+# Add new entries when a new failure/observation type is encountered.
+# The code (e.g., ERROR1) is the stable identifier users put in notes.
+# The short label is injected into diagnosis prompts so the LLM sees it.
+
+errors:
+  ERROR1:
+    label: "凝胶在摩擦过程中破裂 (Gel rupture during friction)"
+    severity: critical
+    impact: "Prioritize modulus optimization over COF. Current formulation lacks mechanical integrity."
+    suggested_action: "increase_crosslink_density_or_pva_wt"
+
+  ERROR2:
+    label: "PVA水凝胶完全未成胶 (No gelation)"
+    severity: critical
+    impact: "Formulation cannot be tested. Check crosslinking chemistry and processing."
+    suggested_action: "verify_crosslinker_and_catalyst"
+
+  ERROR3:
+    label: "凝胶过软无法夹持测试 (Gel too soft to clamp)"
+    severity: critical
+    impact: "Modulus too low. Need higher PVA wt% or more crosslinking."
+    suggested_action: "increase_pva_wt_or_crosslink_density"
+
+  ERROR4:
+    label: "摩擦后表面可见损伤/剥落 (Visible surface damage after test)"
+    severity: high
+    impact: "Wear resistance insufficient. Consider additives for surface integrity."
+    suggested_action: "add_wear_resistant_additive_or_adjust_crosslink"
+
+  ERROR5:
+    label: "测试中异常噪音/振动 (Unusual noise/vibration during test)"
+    severity: medium
+    impact: "Possible stick-slip or irregular contact. Check surface uniformity."
+    suggested_action: "improve_surface_uniformity_or_lubrication"
+
+  ERROR6:
+    label: "凝胶在浸泡后过度溶胀变形 (Excessive swelling after soak)"
+    severity: high
+    impact: "Crosslink density too low. Water uptake uncontrolled."
+    suggested_action: "increase_crosslink_density_or_reduce_soak_time"
+
+  ERROR7:
+    label: "摩擦系数随测试时间持续上升 (COF rises continuously during test)"
+    severity: medium
+    impact: "Boundary lubrication layer not stable. Consider lubricating additives."
+    suggested_action: "add_or_increase_lubricating_additive"
+
+  ERROR8:
+    label: "制备过程中出现沉淀/相分离 (Precipitate/phase separation during preparation)"
+    severity: high
+    impact: "Material incompatibility. Check additive solubility and mixing order."
+    suggested_action: "adjust_mixing_order_or_replace_incompatible_additive"
+
+  ERROR9:
+    label: "批次间重复性差 (Poor batch-to-batch reproducibility)"
+    severity: medium
+    impact: "Process control needed. Document every step timing and temperature precisely."
+    suggested_action: "improve_process_control_and_documentation"
+
+  ERROR10:
+    label: "其他异常 (Other anomaly — see free-text notes)"
+    severity: info
+    impact: "Check free-text notes for details."
+    suggested_action: "review_notes"

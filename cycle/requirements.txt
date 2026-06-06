@@ -1,0 +1,8 @@
+numpy>=1.21
+matplotlib>=3.5
+pyyaml>=6.0
+openai>=1.0
+
+# Optional: local HuggingFace inference (--engine transformers)
+# transformers>=4.40
+# torch>=2.0
