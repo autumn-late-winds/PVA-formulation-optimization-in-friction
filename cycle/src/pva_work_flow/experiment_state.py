@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
-from .wetlab_outcomes import has_failure, outcome_status, performance_rank, rank_key
+from .wetlab_outcomes import has_failure, outcome_status, performance_rank, rank_key, compute_cvs
 
 
 # ---- TypedDict schemas ----
@@ -165,24 +165,23 @@ def summarize_round(round_obj: Dict[str, Any]) -> str:
     if not records:
         return f"Round {round_id}: no records."
 
-    # Best formulas: failed/unusable rows are ranked after valid measurements.
+    # Best formulas: ranked by CVS (handles failure + COF + stability in one score)
     ranked = sorted(
         records,
-        key=lambda r: (
-            2 if r.get("experimental_status") == "experimental_failed" else 0,
-            _float_or_default(r.get("observations", {}).get("friction_coefficient")),
-        ),
+        key=lambda r: -r.get("interpretation", {}).get("cvs", 0.0),
     )
-    lines.append(f"\nBest performers (failure-aware, then by COF):")
+    lines.append(f"\nBest performers (CVS ranking):")
     for r in ranked[:3]:
         obs = r.get("observations", {}) or {}
         interp = r.get("interpretation", {}) or {}
+        cvs_val = interp.get("cvs", 0.0)
+        cvs_grade = interp.get("cvs_grade", "?")
         lines.append(
             f"  {r.get('formula_id', '?')}: "
+            f"CVS={cvs_val:.1f}({cvs_grade}), "
             f"COF={obs.get('friction_coefficient', '?')}, "
             f"gel={obs.get('gelation_status', '?')}, "
-            f"integrity={obs.get('sample_integrity', '?')}, "
-            f"rank={interp.get('performance_rank', '?')}"
+            f"integrity={obs.get('sample_integrity', '?')}"
         )
 
     # Failures
@@ -282,12 +281,16 @@ def build_experiment_round_from_pipeline(
 
         # Build interpretation (heuristic)
         rank = performance_rank(r) if r else "unknown"
+        cvs_result = compute_cvs(r) if r else {}
 
         interpretation: dict[str, Any] = {
             "performance_rank": rank,
             "main_advantage": f"COF={cof}" if cof is not None else "unknown",
             "main_problem": failure_note or r.get("friction_pattern", "unknown"),
             "failure_aware_rank_key": list(rank_key(r)) if r else [3, 999.0, 999.0],
+            "cvs": cvs_result.get("cvs", 0.0) if r else 0.0,
+            "cvs_grade": cvs_result.get("grade", "F") if r else "F",
+            "cvs_i_multiplier": cvs_result.get("i_multiplier", 1.0) if r else 1.0,
             "next_round_suggestion": "",
         }
 

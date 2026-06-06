@@ -7,6 +7,7 @@ lineage skeleton, while the LLM only explains and completes it.
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -16,6 +17,31 @@ from .experiment_notes import is_candidate_mechanically_failed, load_notes
 
 MAX_CONSTRAINED_CANDIDATES = 6
 ENABLE_LIMITED_EXPLORATION_BY_DEFAULT = False
+DEFAULT_NUMERIC_DECREASE_FACTOR = 0.5
+DEFAULT_NUMERIC_INCREASE_FACTOR = 2.0
+DEFAULT_FREEZE_THAW_STEP = 2
+BINARY_SEARCH_BOUNDS = {
+    "pva_wt_percent": (5.0, 20.0),
+    "primary_additive_wt_percent": (0.05, 1.5),
+    "crosslinker_wt_percent": (0.05, 1.5),
+    "initiator_or_catalyst_wt_percent": (0.02, 0.5),
+    "post_soak_hours": (0.5, 8.0),
+    "freeze_thaw_cycles": (0.0, 5.0),
+}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(float(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def _parent_round_path(out_dir: Path, round_idx: int, parent_round_idx: int | None = None) -> Path:
@@ -81,19 +107,46 @@ def _small_numeric_step(value: Any, direction: str) -> Any:
     except (TypeError, ValueError):
         return value
     if direction == "decrease":
-        return max(0.0, round(number * 0.75, 4))
+        factor = _env_float("PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR", DEFAULT_NUMERIC_DECREASE_FACTOR)
+        return max(0.0, round(number * factor, 4))
     if direction == "increase":
-        return round(number * 1.25, 4)
+        factor = _env_float("PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR", DEFAULT_NUMERIC_INCREASE_FACTOR)
+        return round(number * factor, 4)
     return number
 
 
+def _binary_midpoint_step(variable: str, value: Any, direction: str) -> Any:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    bounds = BINARY_SEARCH_BOUNDS.get(variable)
+    if not bounds:
+        return _small_numeric_step(value, direction)
+    low, high = bounds
+    if direction == "decrease":
+        target = low
+    elif direction == "increase":
+        target = high
+    else:
+        return number
+    midpoint = round((number + target) / 2.0, 4)
+    if variable == "freeze_thaw_cycles":
+        return max(0, int(round(midpoint)))
+    return midpoint
+
+
 def _small_step_for_variable(variable: str, value: Any, direction: str) -> Any:
+    step_strategy = os.environ.get("PVA_CONSTRAINED_STEP_STRATEGY", "binary").strip().lower()
+    if step_strategy in ("binary", "bisection", "midpoint"):
+        return _binary_midpoint_step(variable, value, direction)
     if variable == "freeze_thaw_cycles":
         try:
             cycles = int(round(float(value)))
         except (TypeError, ValueError):
             return value
-        delta = -1 if direction == "decrease" else 1
+        step = max(1, _env_int("PVA_CONSTRAINED_FREEZE_THAW_STEP", DEFAULT_FREEZE_THAW_STEP))
+        delta = -step if direction == "decrease" else step
         return max(0, cycles + delta)
     return _small_numeric_step(value, direction)
 
@@ -127,7 +180,7 @@ def _changed(variable: str, old_value: Any, new_value: Any, reason_code: str) ->
         "variable": variable,
         "old_value": old_value,
         "new_value": new_value,
-        "change_magnitude": "small",
+        "change_magnitude": os.environ.get("PVA_CONSTRAINED_CHANGE_MAGNITUDE", "binary_midpoint"),
         "reason_code": reason_code,
     }
 
@@ -198,7 +251,7 @@ def build_constrained_doe_skeleton(
 ) -> Dict[str, Any]:
     """Build a small deterministic inheritance table for R2+.
 
-    Default output is a set of small-step optimization rows:
+    Default output is a set of binary-midpoint optimization rows:
     single-factor perturbations first, then local optimization if more rows are requested.
     limited_exploration is disabled by default to keep the project easier.
     """
@@ -215,7 +268,12 @@ def build_constrained_doe_skeleton(
     by_id = _candidate_by_id(parents)
     # ---- Parent selection with mechanical-failure awareness ----
     # Sort candidates by COF (lowest first) so code-layer ranking supplements LLM audit.
+    # Results CSV may live in out_dir/ or out_dir/run_state_files/ (newer layout).
     _results_path = out_dir / f"R{source_round}_results_filled.csv"
+    if not _results_path.exists():
+        _alt_path = out_dir / "run_state_files" / f"R{source_round}_results_filled.csv"
+        if _alt_path.exists():
+            _results_path = _alt_path
     _cof_by_id: Dict[str, float] = {}
     if _results_path.exists():
         import csv
@@ -233,22 +291,58 @@ def build_constrained_doe_skeleton(
             pass
 
     def _ranked_parents(ids, by_id, parents_list):
-        """Yield parent dicts in order: non-failed first (by COF), then the rest."""
-        failed_ids = set()
+        """Yield parent dicts in CVS-descending order (best overall viability first).
+
+        CVS naturally penalises mechanical failure through its multiplicative
+        integrity gate I, so failed parents are automatically demoted without
+        needing a separate pass/fail filter.
+        """
+        from .wetlab_outcomes import compute_cvs
+
+        # Resolve error codes from experiment_notes
+        _notes_e = load_notes(out_dir, round_idx - 1)
+        _error_codes_by_id: dict[str, list[str]] = {}
+        if _notes_e:
+            for _cid, _entry in _notes_e.items():
+                if isinstance(_entry, dict) and _entry.get("error_codes"):
+                    _error_codes_by_id[_cid] = [str(e) for e in _entry["error_codes"]]
+
+        # Compute CVS for each parent that has COF data
+        _cvs_by_id: dict[str, float] = {}
         for cid in ids:
-            if is_candidate_mechanically_failed(by_id.get(cid, {}), out_dir, round_idx - 1):
-                failed_ids.add(cid)
-        # non-failed, sorted by COF ascending
-        ok_ids = [cid for cid in ids if cid in by_id and cid not in failed_ids]
-        ok_ids.sort(key=lambda cid: _cof_by_id.get(cid, float("inf")))
-        for cid in ok_ids:
+            if cid not in by_id:
+                continue
+            # Build a result-like row from the filled CSV if available
+            row: dict[str, Any] = {"candidate_id": cid}
+            cof = _cof_by_id.get(cid)
+            if cof is not None:
+                row["cof_steady_mean"] = cof
+            # Enrich with other columns from results CSV
+            if _results_path.exists():
+                try:
+                    with open(_results_path, encoding="utf-8-sig", newline="") as _fh:
+                        for _row in csv.DictReader(_fh):
+                            if (_row.get("candidate_id") or "").strip() == cid:
+                                row = _row
+                                break
+                except Exception:
+                    pass
+            if row.get("cof_steady_mean") is not None:
+                ec = _error_codes_by_id.get(cid)
+                _cvs_by_id[cid] = compute_cvs(row, error_codes=ec if ec else None).get("cvs", 0.0)
+            else:
+                _cvs_by_id[cid] = 0.0  # no COF → bottom
+
+        # Sort by CVS descending
+        sorted_ids = sorted(
+            [cid for cid in ids if cid in by_id],
+            key=lambda cid: -_cvs_by_id.get(cid, 0.0),
+        )
+        for cid in sorted_ids:
             yield by_id[cid]
-        # then failed ones
-        for cid in ids:
-            if cid in by_id and cid in failed_ids:
-                yield by_id[cid]
-        # fallback: any remaining parents not yet yielded
-        yielded_ids = set(ok_ids) | {cid for cid in ids if cid in failed_ids}
+
+        # Fallback: any remaining parents not yet yielded
+        yielded_ids = set(sorted_ids)
         for p in parents_list:
             pid = p.get("candidate_id", "")
             if pid and pid not in yielded_ids:
@@ -277,19 +371,79 @@ def build_constrained_doe_skeleton(
 
     n = max(1, min(int(requested_count or MAX_CONSTRAINED_CANDIDATES), MAX_CONSTRAINED_CANDIDATES))
 
+    # ---- Parent-state-aware first perturbation direction ----
+    # Read parent COF to decide whether to prioritise lubrication or reinforcement.
+    _parent_cid = best_parent.get("candidate_id", "")
+    _parent_cof = _cof_by_id.get(_parent_cid)
+    _parent_friction = ""  # from results CSV if available
+    _parent_stick_slip = None
+    if _parent_cid and _results_path.exists():
+        try:
+            with open(_results_path, encoding="utf-8-sig", newline="") as _fh:
+                for _row in csv.DictReader(_fh):
+                    if (_row.get("candidate_id") or "").strip() == _parent_cid:
+                        _parent_friction = (_row.get("friction_pattern") or "").strip().lower()
+                        try:
+                            _parent_stick_slip = float(_row.get("stick_slip_score", ""))
+                        except (ValueError, TypeError):
+                            pass
+                        break
+        except Exception:
+            pass
+
+    # Heuristic: parent with low COF but irregular/asymmetric friction or high stick-slip
+    # needs mechanical reinforcement, not further softening.
+    _needs_reinforcement = (
+        _parent_cof is not None
+        and _parent_cof < 0.02
+        and (
+            _parent_friction in ("irregular", "asymmetric")
+            or (_parent_stick_slip is not None and _parent_stick_slip > 0.3)
+        )
+    )
+
     table: List[Dict[str, Any]] = []
     if len(table) < n:
-        variable = "pva_wt_percent"
-        old = _value_for_variable(best_parent, variable)
-        new = _small_step_for_variable(variable, old, "decrease")
+        if _needs_reinforcement:
+            # Prioritise crosslinker increase to fix mechanical integrity
+            variable = "crosslinker_wt_percent"
+            old = _value_for_variable(best_parent, variable)
+            if old in (None, "") or str(old) in ("0", "0.0"):
+                # Fall back to PVA increase if no crosslinker wt% available
+                variable = "pva_wt_percent"
+                old = _value_for_variable(best_parent, variable)
+                direction = "increase"
+                reason_code = "increase_mechanical_integrity"
+                rationale = (
+                    f"Increase PVA concentration to reinforce mechanical integrity "
+                    f"(parent COF={_parent_cof:.4f} is already low but friction is {_parent_friction})."
+                )
+            else:
+                direction = "increase"
+                reason_code = "increase_crosslink_density"
+                rationale = (
+                    f"Increase crosslinker to reinforce network integrity "
+                    f"(parent COF={_parent_cof:.4f} is already low but friction is {_parent_friction})."
+                )
+        else:
+            variable = "pva_wt_percent"
+            old = _value_for_variable(best_parent, variable)
+            direction = "decrease"
+            reason_code = "reduce_contact_stiffness_or_increase_hydration"
+            rationale = (
+                "Test a lower PVA concentration around the best parent "
+                "instead of spending a slot on exact reproduction."
+            )
+
+        new = _small_step_for_variable(variable, old, direction)
         if old not in (None, "") and new is not None and not _numeric_equivalent(old, new):
             table.append(
                 _entry(
                     f"R{round_idx}-{len(table) + 1:02d}",
                     "single_factor_perturbation",
                     best_parent,
-                    [_changed(variable, old, new, "reduce_contact_stiffness_or_increase_hydration")],
-                    "Test a lower PVA concentration around the best parent instead of spending a slot on exact reproduction.",
+                    [_changed(variable, old, new, reason_code)],
+                    rationale,
                     "COF decreases if lower contact stiffness/higher hydration helps, while gel integrity remains acceptable.",
                 )
             )
@@ -450,7 +604,7 @@ def build_constrained_doe_skeleton(
         type_counts[dt] = type_counts.get(dt, 0) + 1
 
     return {
-        "design_theme": "Constrained small-step PVA DOE generated by code; LLM may explain but must not alter skeleton fields.",
+        "design_theme": "Constrained binary-midpoint PVA DOE generated by code; LLM may explain but must not alter skeleton fields.",
         "optimization_scope": "single_parent_tree",
         "target_parent_id": best_parent.get("candidate_id", ""),
         "parent_round_idx": source_round,

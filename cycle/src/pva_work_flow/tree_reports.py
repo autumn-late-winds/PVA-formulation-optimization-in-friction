@@ -257,7 +257,137 @@ def build_tree_reports(out_dir: Path) -> Dict[str, Path]:
     """Build all human-facing tree reports for a run workspace."""
     build_global_tree_summary(out_dir)
     build_experiment_formula_summary(out_dir)
+    build_chain_report(out_dir)
     return {
         "global_tree_summary": out_dir / "GLOBAL_TREE_SUMMARY.md",
         "experiment_formula_summary": out_dir / "EXPERIMENT_FORMULA_SUMMARY.md",
+        "chain_report": out_dir / "GREEDY_CHAINS_R2.md",
     }
+
+
+def build_chain_report(out_dir: Path) -> str:
+    """Generate an accurate greedy-chain report from actual DOE CSV data.
+
+    Unlike the LLM-generated version, this reads real DOE values so there is
+    no drift between what the report claims and what the experiment protocol says.
+    """
+    reports_dir = out_dir / "tree_reports"
+    trees_dir = out_dir / "trees"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find the latest round with DOE CSVs in trees
+    tree_dirs = sorted(
+        [p for p in trees_dir.iterdir() if p.is_dir()],
+        key=lambda p: p.name,
+    ) if trees_dir.exists() else []
+
+    # Load parent COF data
+    parent_cofs: dict[str, str] = {}
+    r1_results = out_dir / "run_state_files" / "R1_results_filled.csv"
+    if r1_results.exists():
+        with r1_results.open(encoding="utf-8-sig", newline="") as fh:
+            for row in csv.DictReader(fh):
+                cid = (row.get("candidate_id") or "").strip()
+                if cid:
+                    parent_cofs[cid] = row.get("cof_steady_mean", "?")
+
+    lines = [
+        "# R2 Greedy Chains — code-generated from DOE CSV data",
+        "",
+        f"Source directory: `{out_dir.name}`",
+        "",
+    ]
+
+    # Collect chain data
+    chains: list[dict] = []
+    for tree_dir in tree_dirs:
+        doe_csv = tree_dir / "R2_doe.csv"
+        r1_id = "R1-" + tree_dir.name.split("-")[1]
+        parent_cof = parent_cofs.get(r1_id, "?")
+
+        if not doe_csv.exists():
+            continue
+
+        children: list[dict] = []
+        with doe_csv.open(encoding="utf-8-sig", newline="") as fh:
+            for row in csv.DictReader(fh):
+                cid = (row.get("candidate_id") or "").strip()
+                if not cid:
+                    continue
+                pva = row.get("pva_wt_percent", "?")
+                soak = row.get("post_soak_hours", "?")
+                adds = (row.get("additives") or "").strip()
+                children.append({"cid": cid, "pva": pva, "soak": soak, "adds": adds})
+
+        if children:
+            chains.append({
+                "tree": tree_dir.name,
+                "parent_id": r1_id,
+                "parent_cof": parent_cof,
+                "children": children,
+            })
+
+    if not chains:
+        lines.append("_No R2 DOE CSV files found in tree directories._")
+        text = "\n".join(lines) + "\n"
+        (reports_dir / "GREEDY_CHAINS_R2.md").write_text(text, encoding="utf-8")
+        return text
+
+    # ---- Text chain diagram ----
+    lines.append("## Chain Diagram (from DOE CSV)")
+    lines.append("")
+    lines.append("```text")
+
+    for chain in chains:
+        cof_str = f"COF={chain['parent_cof']}"
+        lines.append(f"{chain['parent_id']}  [{chain['tree']}] | parent {cof_str}")
+        for i, child in enumerate(chain["children"]):
+            adds_str = f"additives: {child['adds']}" if child["adds"] else "⚠ additives EMPTY"
+            marker = ""
+            if not child["adds"]:
+                marker = " ⚠"
+            lines.append(f"  |")
+            lines.append(f"  +-- {child['cid']} [pending] PVA={child['pva']}%  soak={child['soak']}h  {adds_str}{marker}")
+        lines.append("")
+
+    lines.append("```")
+
+    # ---- Mermaid diagram ----
+    lines.append("")
+    lines.append("## Mermaid View")
+    lines.append("")
+    lines.append("```mermaid")
+    lines.append("flowchart TD")
+
+    for chain in chains:
+        node_id = chain["parent_id"].replace("-", "")
+        cof_str = chain["parent_cof"]
+        lines.append(f'    {node_id}["{chain["parent_id"]} [{chain["tree"]}]<br/>COF={cof_str}"]')
+        for i, child in enumerate(chain["children"]):
+            child_node = f"{node_id}_{i + 1}"
+            has_adds = "✅" if child["adds"] else "⚠️"
+            lines.append(
+                f'    {node_id} --> {child_node}["{child["cid"]}<br/>'
+                f'PVA={child["pva"]}% soak={child["soak"]}h<br/>{has_adds}"]'
+            )
+        lines.append("")
+
+    lines.append("```")
+
+    # ---- Summary table ----
+    lines.append("")
+    lines.append("## Summary")
+    lines.append("")
+    lines.append("| Tree | Parent | Parent COF | #R2 | Additives OK? |")
+    lines.append("| --- | --- | ---: | ---: | --- |")
+    for chain in chains:
+        has_empty = any(not c["adds"] for c in chain["children"])
+        status = "❌ EMPTY" if has_empty else "✅"
+        lines.append(
+            f"| {chain['tree']} | {chain['parent_id']} | {chain['parent_cof']} | "
+            f"{len(chain['children'])} | {status} |"
+        )
+
+    text = "\n".join(lines) + "\n"
+    (reports_dir / "GREEDY_CHAINS_R2.md").write_text(text, encoding="utf-8")
+    return text

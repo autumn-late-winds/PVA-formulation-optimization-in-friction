@@ -15,7 +15,7 @@ from typing import Any
 
 from .artifact_store import RunWorkspace
 from .io_artifacts import aggregate_cof_from_row
-from .wetlab_outcomes import has_failure
+from .wetlab_outcomes import has_failure, compute_cvs
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -66,6 +66,11 @@ def _load_results(out_dir: Path) -> dict[str, dict[str, Any]]:
                 cof, cof_std = aggregate_cof_from_row(row)
                 row["_cof"] = cof
                 row["_cof_std"] = cof_std
+                # Compute CVS for ranking
+                cvs_result = compute_cvs(row)
+                row["_cvs"] = cvs_result.get("cvs", 0.0)
+                row["_cvs_grade"] = cvs_result.get("grade", "F")
+                row["_cvs_i"] = cvs_result.get("i_multiplier", 1.0)
                 results[cid] = row
     return results
 
@@ -106,6 +111,7 @@ def _trace_root(
     candidates: dict[str, dict[str, Any]],
     cofs: dict[str, float],
     accept_delta: float,
+    cvs_by_id: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     current = root_id
     visited: set[str] = set()
@@ -116,7 +122,11 @@ def _trace_root(
         measured_children = [cid for cid in children.get(current, []) if cid in cofs]
         if parent_cof is None or not measured_children:
             break
-        best_child = min(measured_children, key=lambda cid: cofs[cid])
+        # Use CVS as primary ranking (higher = better); fall back to COF (lower = better)
+        if cvs_by_id and any(cvs_by_id.get(c) is not None for c in measured_children):
+            best_child = max(measured_children, key=lambda cid: cvs_by_id.get(cid, 0.0))
+        else:
+            best_child = min(measured_children, key=lambda cid: cofs[cid])
         delta = cofs[best_child] - parent_cof
         accepted = delta < accept_delta
         candidate = candidates.get(best_child, {})
@@ -126,6 +136,7 @@ def _trace_root(
                 "parent_cof": parent_cof,
                 "best_child_id": best_child,
                 "best_child_cof": cofs[best_child],
+                "best_child_cvs": cvs_by_id.get(best_child) if cvs_by_id else None,
                 "changed_variables": _changed_names(candidate),
                 "delta_cof": round(delta, 6),
                 "decision": "accept" if accepted else "retry_parent",
@@ -191,13 +202,23 @@ def build_chain_memory(out_dir: Path, accept_delta: float = -1e-6) -> dict[str, 
         for cid, row in results.items()
         if row.get("_cof") is not None and not row.get("_experimental_failed")
     }
+    cvs_by_id = {
+        cid: float(row.get("_cvs", 0.0))
+        for cid, row in results.items()
+        if row.get("_cvs") is not None
+    }
     measured_roots = [root for root in roots if root in cofs]
     chains = [
-        _trace_root(root, children, candidates, cofs, accept_delta)
+        _trace_root(root, children, candidates, cofs, accept_delta, cvs_by_id)
         for root in measured_roots
     ]
     chains = [chain for chain in chains if chain.get("trace")]
     variable_stats = _summarize_variables(chains)
+
+    # Best CVS across all measured candidates
+    _all_cvs = [(cid, row.get("_cvs", 0.0), row.get("_cvs_grade", "F"))
+                 for cid, row in results.items() if row.get("_cvs") is not None]
+    _all_cvs.sort(key=lambda x: -x[1])
 
     payload = {
         "summary": {
@@ -208,7 +229,14 @@ def build_chain_memory(out_dir: Path, accept_delta: float = -1e-6) -> dict[str, 
                 1 for chain in chains for step in chain.get("trace", []) if step.get("decision") == "retry_parent"
             ),
             "accept_delta": accept_delta,
+            "best_overall_cvs": _all_cvs[0][1] if _all_cvs else 0.0,
+            "best_overall_cvs_candidate": _all_cvs[0][0] if _all_cvs else None,
+            "best_overall_cvs_grade": _all_cvs[0][2] if _all_cvs else "F",
         },
+        "cvs_ranking": [
+            {"candidate_id": cid, "cvs": cvs, "grade": grade}
+            for cid, cvs, grade in _all_cvs[:10]
+        ],
         "variable_stats": variable_stats,
         "chains": chains,
     }

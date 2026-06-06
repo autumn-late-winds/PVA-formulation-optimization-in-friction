@@ -1059,13 +1059,20 @@ def run_generator(
                     if similar:
                         material_suggestions[name] = similar
 
+        # Determine if this is a constrained DOE candidate (inherits from parent via deep-copy).
+        # Constrained DOE candidates should always preserve parent additives — the materializer
+        # already copied them from a known-working parent formulation.
+        _is_constrained = c.get("generation_mode") == "fallback"
+
         kept_additives = []
         for a in additives:
             if isinstance(a, dict):
                 name = (a.get("name") or "").strip()
                 name_low = name.lower()
                 role = (a.get("role") or "additive").strip()
-                if not allowed_set or name_low == "none" or name_low in allowed_set:
+                # Always keep additives from constrained DOE (parent inheritance).
+                # For LLM-generated candidates, filter against allowed_set to catch hallucinations.
+                if _is_constrained or not allowed_set or name_low == "none" or name_low in allowed_set:
                     kept_additives.append(a)
                 elif material_info:
                     similar = find_similar_materials(name, role, material_info, top_n=2)
@@ -1074,7 +1081,7 @@ def run_generator(
             elif isinstance(a, str):
                 nm = a.strip()
                 nm_low = nm.lower()
-                if not allowed_set or nm_low == "none" or nm_low in allowed_set:
+                if _is_constrained or not allowed_set or nm_low == "none" or nm_low in allowed_set:
                     kept_additives.append(a)
                 elif material_info:
                     similar = find_similar_materials(nm, "additive", material_info, top_n=2)

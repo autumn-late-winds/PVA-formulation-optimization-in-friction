@@ -25,6 +25,7 @@ from .utils import read_json, write_json, _to_float_or_none, safe_json_loads
 from .io_artifacts import export_doe_csv, export_results_template, read_results_filled, compute_kpis, aggregate_cof_from_row
 from .config import CONSTRAINTS, GenerationMode, CandidateDict, CONVERGENCE as _DEFAULT_CONVERGENCE
 from .experiment_notes import build_notes_context_for_diagnosis
+from .wetlab_outcomes import compute_cvs, has_failure
 from .formulation_checks import (
     _text_blob_for_mechanism,
     compute_prep_time_hours,
@@ -799,12 +800,33 @@ def run_diagnose(
             "missing_info": ["diagnosis_llm_json_parse_failed"],
         }
         
-    # ---- Per-branch dCOF evaluation (tree mode) ----
+    # ---- Per-branch dCOF evaluation (tree mode) + CVS ranking ----
     # Load all prior-round COF values so each child compares against its true
     # parent, even if that parent is older than R(n-1).
     _parent_cof: dict[str, float] = load_prior_cof_by_candidate(out_dir, round_idx)
 
-    scored_rows: List[Tuple[str, float, float, str, float | None]] = []
+    # ---- Resolve error codes from experiment_notes for CVS computation ----
+    from .experiment_notes import load_notes as _load_notes
+    _notes = _load_notes(out_dir, round_idx)
+    _error_codes_by_id: dict[str, list[str]] = {}
+    if _notes:
+        for _cid, _entry in _notes.items():
+            if _cid.startswith("_") or not isinstance(_entry, dict):
+                continue
+            _errs = _entry.get("error_codes") or []
+            if _errs:
+                _error_codes_by_id[_cid] = [str(e) for e in _errs]
+
+    # ---- Compute CVS for every result row ----
+    _cvs_cache: dict[str, dict] = {}
+    for r in results_rows:
+        cid = r.get("candidate_id")
+        if not cid:
+            continue
+        ec = _error_codes_by_id.get(cid)
+        _cvs_cache[cid] = compute_cvs(r, error_codes=ec if ec else None)
+
+    scored_rows: list[dict] = []
     for r in results_rows:
         cid = r.get("candidate_id")
         if not cid:
@@ -818,30 +840,32 @@ def run_diagnose(
         parent_cid = (by_id.get(cid, {}).get("parent_candidate_id") or "").strip()
         parent_cof = _parent_cof.get(parent_cid) if parent_cid else None
         dcof = (float(cof) - parent_cof) if parent_cof is not None else None
-        scored_rows.append((cid, float(cof), std_val, failure_type, dcof))
+        cvs_result = _cvs_cache.get(cid, {})
+        scored_rows.append({
+            "cid": cid,
+            "cof": float(cof),
+            "std": std_val,
+            "failure_type": failure_type,
+            "dcof": dcof,
+            "cvs": cvs_result.get("cvs", 0.0),
+            "cvs_grade": cvs_result.get("grade", "F"),
+            "cvs_i": cvs_result.get("i_multiplier", 1.0),
+            "cvs_p": cvs_result.get("p_score", 0.0),
+            "cvs_s": cvs_result.get("s_score", 0.0),
+        })
 
-    # In tree mode (R2+), rank by dCOF (most improvement first).
-    # In R1 (no parent COF), fall back to absolute COF ranking.
-    if round_idx > 1 and any(d is not None for _, _, _, _, d in scored_rows):
-        # Separate into improved (dCOF < 0) and worsened (dCOF >= 0 or unknown)
-        improved = [x for x in scored_rows if x[4] is not None and x[4] < 0]
-        worsened = [x for x in scored_rows if x not in improved]
-        improved.sort(key=lambda x: (x[4] or 0, x[2]))   # most negative dCOF first
-        worsened.sort(key=lambda x: (x[1], x[2]))          # lowest absolute COF first
-        scored_rows = improved + worsened
-    else:
-        scored_rows.sort(key=lambda x: (x[1], x[2]))       # R1: raw COF ascending
+    # ---- CVS-based ranking (primary) ----
+    scored_rows.sort(key=lambda x: -x["cvs"])
 
-    passing_rows = [x for x in scored_rows if x[3] in ("none", "", "na")]
-    if passing_rows:
-        best_candidates = [cid for cid, _cof, _std, _failure, _dcof in passing_rows[:3]]
-    else:
-        best_candidates = [cid for cid, _cof, _std, _failure, _dcof in scored_rows[:3]]
+    # Best candidates: top 3 by CVS, but always prefer non-failed when CVS tie
+    best_candidates = [x["cid"] for x in scored_rows[:3]]
 
-    # Per-branch evaluation summaries for tree-mode diagnosis
+    # ---- Per-branch evaluation summaries (dCOF-based, for tree-mode diagnosis) ----
     branch_evaluations: list[dict] = []
-    for cid, cof, std, failure, dcof in scored_rows:
+    for x in scored_rows:
+        cid = x["cid"]
         parent_cid = (by_id.get(cid, {}).get("parent_candidate_id") or "").strip()
+        dcof = x["dcof"]
         if dcof is not None:
             if dcof < -0.005:
                 verdict = "improved"
@@ -854,46 +878,48 @@ def run_diagnose(
         branch_evaluations.append({
             "candidate_id": cid,
             "parent_candidate_id": parent_cid or None,
-            "cof": round(cof, 6),
+            "cof": round(x["cof"], 6),
             "dcof": round(dcof, 6) if dcof is not None else None,
             "verdict": verdict,
+            "cvs": x["cvs"],
+            "cvs_grade": x["cvs_grade"],
         })
 
-    # ---- Post-process: cross-reference experiment_notes to exclude mechanically ----
-    # ---- failed candidates from best_candidates and re-mark their perf_class.  ----
-    from .experiment_notes import load_notes as _load_notes, error_severity as _error_severity
-    _notes = _load_notes(out_dir, round_idx)
-    _failed_ids: set = set()
-    if _notes:
-        for _cid, _entry in _notes.items():
-            if _cid.startswith("_") or not isinstance(_entry, dict):
-                continue
-            _errs = _entry.get("error_codes") or []
-            if any(_error_severity(e) == "critical" for e in _errs):
-                _failed_ids.add(_cid)
+    # ---- Re-mark candidate_repairs for mechanically-failed candidates ----
+    _failed_ids = {cid for cid, cv in _cvs_cache.items() if cv.get("i_multiplier", 1.0) < 1.0}
+    for _repair in candidate_repairs:
+        _rcid = _repair.get("candidate_id", "")
+        if _rcid in _failed_ids:
+            _cv = _cvs_cache.get(_rcid, {})
+            _repair["performance_class"] = "mechanically_failed"
+            _repair["cvs"] = _cv.get("cvs")
+            _repair["cvs_grade"] = _cv.get("grade")
+            _repair.setdefault("_experiment_note_warning",
+                "COF data unreliable due to mechanical failure (rupture/no-gel). "
+                f"CVS I-multiplier={_cv.get('i_multiplier', '?')}.")
+        elif _rcid in _cvs_cache:
+            _cv = _cvs_cache[_rcid]
+            _repair["cvs"] = _cv.get("cvs")
+            _repair["cvs_grade"] = _cv.get("grade")
 
-    if _failed_ids:
-        # Remove mechanically failed from best_candidates
-        _before = len(best_candidates)
-        best_candidates = [c for c in best_candidates if c not in _failed_ids]
-        if len(best_candidates) < _before:
-            print(f"[DIAG] Removed {_before - len(best_candidates)} mechanically-failed candidates from best_candidates: "
-                  f"{[c for c in best_candidates if c not in best_candidates] if False else set(best_candidates)}")
-            # Refill from scored_rows sorted by COF, skipping failed
-            _remaining = [(cid, cof, std, ft, dcof) for cid, cof, std, ft, dcof in scored_rows
-                          if cid not in _failed_ids and cid not in set(best_candidates)]
-            _remaining.sort(key=lambda x: (x[1], x[2]))
-            for _cid, _cof, _std, _ft, _dcof in _remaining:
-                if len(best_candidates) >= 3:
-                    break
-                best_candidates.append(_cid)
-
-        # Re-mark candidate_repairs for mechanically failed candidates
-        for _repair in candidate_repairs:
-            _rcid = _repair.get("candidate_id", "")
-            if _rcid in _failed_ids:
-                _repair["performance_class"] = "mechanically_failed"
-                _repair.setdefault("_experiment_note_warning", "COF data unreliable due to mechanical failure (rupture/no-gel)")
+    # ---- CVS summary for diagnosis output ----
+    _cvs_summary = {
+        "best_cvs": scored_rows[0]["cvs"] if scored_rows else 0.0,
+        "best_grade": scored_rows[0]["cvs_grade"] if scored_rows else "F",
+        "cvs_ranking": [
+            {"candidate_id": x["cid"], "cvs": x["cvs"], "grade": x["cvs_grade"],
+             "i_multiplier": x["cvs_i"], "p_score": x["cvs_p"], "s_score": x["cvs_s"]}
+            for x in scored_rows[:8]
+        ],
+        "mechanically_failed_count": len(_failed_ids),
+        "mechanically_failed_ids": sorted(_failed_ids) if _failed_ids else [],
+        "cvs_explanation": (
+            "CVS = I x P x S x 100. "
+            "I = integrity gate (1.0=no failure, 0.25=rupture, 0.00=no gel). "
+            "P = 40%COF + 25%wear + 20%modulus + 15%COF_std. "
+            "S = 40%stable_prop + 30%(1-stick_slip) + 30%plateau_ratio."
+        ),
+    }
 
     # ---- Convergence check ----
     conv_result = check_convergence(results_rows, out_dir, round_idx, convergence)
@@ -904,6 +930,7 @@ def run_diagnose(
     diag["candidate_repairs"] = candidate_repairs
     diag["best_candidates"] = best_candidates
     diag["branch_evaluations"] = branch_evaluations
+    diag["cvs_summary"] = _cvs_summary
     diag["convergence"] = conv_result
 
     # ---- Post-process: code-layer structured DOE factors ----
