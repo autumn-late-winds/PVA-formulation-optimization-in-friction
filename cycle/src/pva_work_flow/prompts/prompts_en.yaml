@@ -100,7 +100,7 @@ GEN_PROMPT_R1: |-
   - freeze_thaw_cycles: 1–3 only. Each cycle = freeze phase + thaw phase = cycle_hours × 2.
   - cycle_hours: 1.0–2.0 hours per phase. NEVER use 4.0 or more.
   - Total FT time = freeze_thaw_cycles × cycle_hours × 2. Example: 3 cycles × 1.5h × 2 = 9h.
-  - post_soak_hours: 1–4 hours maximum. This is JUST the final water soak step, NOT total prep time. NEVER use 24, 48, or 72. These are hydration soak, not day-long immersion.
+  - post_soak_hours: 0.25–4 hours. This is JUST the final water soak step, NOT total prep time. NEVER use 24, 48, or 72. Shorter soaks (0.25–1h) are PREFERRED for thin PVA films without freeze-thaw — long soak causes excessive swelling and rupture. 0.25h (15min) surface rinse is a valid screening choice.
   - Total prep time = SUM of all step durations + Total FT time + post_soak_hours. MUST be <= 24h.
   - pva_wt_percent: 5–20. Never use values like 75%.
   - Unused formulation slots (photo_initiator, nanofiller) = {}. If a material role (like initiator_or_catalyst) is not needed, OMIT it from the materials array entirely — do NOT add a dummy entry with name="None".
@@ -262,7 +262,7 @@ GEN_PROMPT_RN: |-
 
   NUMERIC HARD LIMITS (total prep time MUST be <= 24 hours):
   - freeze_thaw_cycles: 1-3. cycle_hours: 1.0-2.0 per phase. Total FT time = cycles × hours × 2.
-  - post_soak_hours: 1-4 max (JUST the soak step, NOT total time). NEVER 24/48/72.
+  - post_soak_hours: 0.25-4 max (JUST the soak step, NOT total time). NEVER 24/48/72. Shorter soaks (0.25-1h) PREFERRED for thin films without freeze-thaw — over-soaking causes excessive swelling and rupture.
   - pva_wt_percent: 5-20.
   - Unused form slots = {}. Do NOT add material entries with name="None" for unused roles.
   - Every material MUST have amount/unit/basis with real numbers.
@@ -372,7 +372,7 @@ DIA_PROMPT: |-
   - cv_amplitude: cycle-to-cycle amplitude variation (<0.3 = stable, >0.5 = irregular)
   - stick_slip_score: high-frequency oscillation in plateaus (>0.4 = stick-slip)
   - stable_proportion: fraction of half-cycles with clear plateaus (>0.6 = good friction)
-  IMPORTANT: When these metrics indicate "asymmetric" or "stick_slip", do NOT recommend "increase freeze-thaw cycles" or "increase post-soak hours" unless the current values are below safe limits (FT<=3, soak<=4h).
+  IMPORTANT: When these metrics indicate "asymmetric" or "stick_slip", do NOT recommend "increase freeze-thaw cycles" or "increase post-soak hours". Instead, consider REDUCING post-soak (to 0.25-1h) — excessive swelling from long soaks is a common rupture/friction-instability cause in thin PVA films without freeze-thaw.
 
   Output requirements:
   - Output JSON only.

@@ -1,16 +1,16 @@
 ﻿import argparse
 from pathlib import Path
-from .llm_engines import MockLLM, TransformersLLM, VllmOpenAIChatLLM
-from .generator import run_generator
-from .audit import run_auditor_rulebased
-from .workflow import run_prepare_wetlab, run_diagnose, run_text_only_diagnose
-from .utils import ensure_dir, read_json, write_json, load_allowed_materials, parse_bruker_csv, discriminate_pattern, plot_fx_vs_t, build_results_from_bruker_csvs
-from .artifact_store import RunWorkspace
-from .simulation import simulate_results
-from .config import GenerationMode, BUDGET, CONVERGENCE as _DEFAULT_CONVERGENCE
-from .budget_manager import count_completed_formulas, infer_stage, recommend_round_shape, budget_exhaustion_warnings, get_remaining_budget
-from .experiment_notes import write_notes_template, load_notes, known_error_codes
-from .tree_naming import find_tree_dir_for_parent, resolve_target_parent_id
+from pva_work_flow.core.llm_engines import MockLLM, TransformersLLM, VllmOpenAIChatLLM
+from pva_work_flow.planning.generator import run_generator
+from pva_work_flow.planning.audit import run_auditor_rulebased
+from pva_work_flow.orchestration.workflow import run_prepare_wetlab, run_diagnose, run_text_only_diagnose
+from pva_work_flow.core.utils import ensure_dir, read_json, write_json, load_allowed_materials, parse_bruker_csv, discriminate_pattern, plot_fx_vs_t, build_results_from_bruker_csvs
+from pva_work_flow.artifacts.artifact_store import RunWorkspace
+from pva_work_flow.wetlab.simulation import simulate_results
+from pva_work_flow.core.config import GenerationMode, BUDGET, CONVERGENCE as _DEFAULT_CONVERGENCE
+from pva_work_flow.orchestration.budget_manager import count_completed_formulas, infer_stage, recommend_round_shape, budget_exhaustion_warnings, get_remaining_budget
+from pva_work_flow.artifacts.experiment_notes import write_notes_template, load_notes, known_error_codes
+from pva_work_flow.tree.tree_naming import find_tree_dir_for_parent, resolve_target_parent_id
 import re
 import csv
 import sys
@@ -54,7 +54,7 @@ def _run_csv_analysis(csv_path_str: str, out_dir: Path) -> None:
 
 def _run_build_results(build_dir: str, out_dir: Path) -> None:
     from collections import defaultdict
-    from .io_artifacts import read_results_filled
+    from pva_work_flow.artifacts.io_artifacts import read_results_filled
 
     base_dir = Path(build_dir)
     if not base_dir.is_dir():
@@ -116,11 +116,11 @@ def _run_build_results(build_dir: str, out_dir: Path) -> None:
             print(f"  {r['candidate_id']:<12} {r.get('cof_steady_mean','-'):>10} {r.get('cof_std','-'):>10}")
 
     try:
-        from .formula_tree import build_tree
-        from .tree_statistics import build_tree_statistics
-        from .chain_memory import build_chain_memory
-        from .tree_reports import build_tree_reports
-        from .tree_visualizer import build_tree_diagram
+        from pva_work_flow.tree.formula_tree import build_tree
+        from pva_work_flow.tree.tree_statistics import build_tree_statistics
+        from pva_work_flow.memory.chain_memory import build_chain_memory
+        from pva_work_flow.tree.tree_reports import build_tree_reports
+        from pva_work_flow.tree.tree_visualizer import build_tree_diagram
 
         build_tree(out_dir)
         build_tree_statistics(out_dir)
@@ -130,6 +130,48 @@ def _run_build_results(build_dir: str, out_dir: Path) -> None:
         print("  [OK] Updated formula_tree.md, cross-tree statistics, chain memory, tree reports, and tree diagram")
     except Exception as e:
         print(f"  [WARN] Could not update tree statistics: {e}")
+
+
+def _has_failure_signal(rows: list[dict], notes_path: Path) -> bool:
+    """Return True when a no-COF round still contains usable failure evidence."""
+
+    critical_codes = {"ERROR1", "ERROR2", "ERROR3"}
+    failure_values = {
+        "rupture",
+        "break",
+        "broken",
+        "failure",
+        "failed",
+        "gel_failed",
+        "no_gelation",
+        "no gelation",
+        "too_soft_to_test",
+    }
+
+    for row in rows:
+        failure_type = str(row.get("failure_type") or "").strip().lower()
+        notes = str(row.get("notes") or "").upper()
+        if failure_type in failure_values:
+            return True
+        if any(code in notes for code in critical_codes):
+            return True
+
+    if notes_path.exists():
+        try:
+            notes_obj = read_json(notes_path)
+        except Exception:
+            notes_obj = {}
+        for key, entry in notes_obj.items() if isinstance(notes_obj, dict) else []:
+            if str(key).startswith("_") or not isinstance(entry, dict):
+                continue
+            codes = {str(code).upper() for code in (entry.get("error_codes") or [])}
+            if codes & critical_codes:
+                return True
+            free_text = str(entry.get("free_text") or "").lower()
+            if any(token in free_text for token in failure_values):
+                return True
+
+    return False
 
 
 # -------------------- Main --------------------
@@ -166,6 +208,14 @@ def main():
     ap.add_argument("--compression_dir", default="", help="Directory of compression-test CSV files for modulus (matched by first digit of filename)")
     ap.add_argument("--write_notes_template", type=int, default=0, help="Write R{N}_experiment_notes.json template for round N")
     ap.add_argument("--list_error_codes", action="store_true", help="List all known experiment error codes")
+    ap.add_argument("--build_failure_memory", action="store_true", help="Rebuild failure_factor_memory.jsonl and verification reports from current results/notes")
+    ap.add_argument("--build_rag_vector_index", action="store_true", help="Build local TF-IDF vector index for experiment memory and formulation RAG")
+    ap.add_argument("--query_rag_vector", default="", help="Query the local vector RAG index and print top semantic matches")
+    ap.add_argument("--agent", action="store_true", help="Run the outer operation agent in advisory mode")
+    ap.add_argument("--agent_execute", default="", help="Execute a low-risk agent tool: refresh_reports, build_failure_memory, build_vector_index")
+    ap.add_argument("--agent_server", action="store_true", help="Run the local low-risk agent web console")
+    ap.add_argument("--agent_server_host", default="127.0.0.1", help="Host for --agent_server")
+    ap.add_argument("--agent_server_port", type=int, default=8765, help="Port for --agent_server")
     # ---- Convergence criteria (override defaults in config.py) ----
     ap.add_argument("--conv_cof_max", type=float, default=None, help="Convergence: max COF to declare convergence (default 0.02)")
     ap.add_argument("--conv_modulus_min", type=float, default=None, help="Convergence: min compression modulus MPa (default 1.5)")
@@ -175,6 +225,32 @@ def main():
     ap.add_argument("--conv_cof_trend_delta", type=float, default=None, help="Convergence: max round-to-round COF delta to consider flat (default 0.005)")
     ap.add_argument("--conv_cof_trend_rounds", type=int, default=None, help="Convergence: consecutive flat rounds needed (default 2)")
     args = ap.parse_args()
+    out_dir = Path(args.out_dir)
+
+    if args.agent_server:
+        from pva_work_flow.agent_server import run_server
+
+        run_server(args.agent_server_host, args.agent_server_port, out_dir)
+        return
+
+    if args.agent:
+        from .agent.planner import build_agent_advice
+        from .agent.reports import render_agent_report
+        from .agent.tools import run_low_risk_tool
+
+        if args.agent_execute:
+            ensure_dir(out_dir)
+            result = run_low_risk_tool(args.agent_execute, out_dir)
+            result_path = out_dir / f"agent_{args.agent_execute}_result.json"
+            write_json(result_path, result)
+            print("[AGENT] low-risk tool executed")
+            print(f"[AGENT] result -> {result_path}")
+            print(result)
+            return
+
+        advice = build_agent_advice(out_dir)
+        print(render_agent_report(advice))
+        return
 
     # Build convergence criteria: CLI overrides > config defaults
     convergence = dict(_DEFAULT_CONVERGENCE)
@@ -200,18 +276,16 @@ def main():
         if args.formulation_rag_db:
             os.environ["PVA_FORMULATION_RAG_DB"] = args.formulation_rag_db
         try:
-            from .formulation_rag import resolve_formulation_rag_db
+            from pva_work_flow.memory.formulation_rag import resolve_formulation_rag_db
 
             print(f"[FORMULATION_RAG] db={resolve_formulation_rag_db()}")
         except Exception as e:
             print(f"[FORMULATION_RAG] db resolution unavailable: {e}")
 
-    out_dir = Path(args.out_dir)
-
     if args.list_error_codes:
         print("Known experiment error codes:")
         for code in known_error_codes():
-            from .experiment_notes import error_label
+            from pva_work_flow.artifacts.experiment_notes import error_label
             print(f"  {code}: {error_label(code)}")
         return
 
@@ -220,16 +294,56 @@ def main():
         print(ws.format_status_report())
         return
 
+    if args.build_failure_memory:
+        from pva_work_flow.memory.failure_factor_memory import build_failure_factor_memory
+
+        records = build_failure_factor_memory(out_dir)
+        print(f"[OK] failure factor memory rebuilt: {len(records)} records")
+        print(f"     {out_dir / 'failure_factor_memory.jsonl'}")
+        print(f"     {out_dir / 'experiment_contrast_memory.jsonl'}")
+        print(f"     {out_dir / 'rag_vector_index.json'}")
+        print(f"     {out_dir / 'FAILURE_FACTOR_SUMMARY.md'}")
+        print(f"     {out_dir / 'NEXT_VERIFICATION_PLAN.md'}")
+        return
+
+    if args.build_rag_vector_index:
+        from pva_work_flow.memory.formulation_rag import resolve_formulation_rag_db
+        from pva_work_flow.memory.vector_rag import build_project_vector_index
+
+        db_path = resolve_formulation_rag_db()
+        index = build_project_vector_index(out_dir, formulation_db=db_path if db_path.exists() else None)
+        print(f"[OK] vector RAG index built: {index.get('doc_count', 0)} docs")
+        print(f"     backend={index.get('embedding_backend')}")
+        print(f"     {out_dir / 'rag_vector_index.json'}")
+        return
+
+    if args.query_rag_vector:
+        from pva_work_flow.memory.formulation_rag import resolve_formulation_rag_db
+        from pva_work_flow.memory.vector_rag import ensure_project_vector_index, query_vector_index, render_vector_hits
+
+        db_path = resolve_formulation_rag_db()
+        index = ensure_project_vector_index(out_dir, formulation_db=db_path if db_path.exists() else None)
+        hits = query_vector_index(index, args.query_rag_vector, top_k=8)
+        print(render_vector_hits(hits, title="LOCAL VECTOR RAG QUERY") or "[EMPTY] no vector matches")
+        return
+
     if args.sync_results:
         run_dir = Path(args.sync_results)
         _run_build_results(str(run_dir), run_dir)
         # Apply experiment notes if present
-        from .experiment_notes import apply_notes_to_candidates
+        from pva_work_flow.artifacts.experiment_notes import apply_notes_to_candidates
         for r in RunWorkspace(run_dir).existing_rounds():
             cand_path = run_dir / f"R{r}_candidates.json"
             if cand_path.exists():
                 obj = read_json(cand_path)
                 apply_notes_to_candidates(obj.get("candidates", []), r, run_dir)
+                write_json(cand_path, obj)
+        try:
+            from pva_work_flow.memory.failure_factor_memory import build_failure_factor_memory
+
+            build_failure_factor_memory(run_dir)
+        except Exception as e:
+            print(f"[WARN] failure factor memory unavailable: {e}")
         print(RunWorkspace(run_dir).format_status_report())
         return
 
@@ -333,7 +447,7 @@ def main():
             # Tree directories use root-* labels; candidate links keep R*-* IDs.
             target_parent_id = resolve_target_parent_id(args.target_parent_id)
             if args.chain_search and r > 1 and not target_parent_id:
-                from .chain_search import resolve_chain_parent, write_chain_state
+                from pva_work_flow.tree.chain_search import resolve_chain_parent, write_chain_state
 
                 chain_root_id = resolve_target_parent_id(args.chain_root_id)
                 chain_state = resolve_chain_parent(
@@ -443,7 +557,9 @@ def main():
                         target_parent_id = target_parent_id or resolve_target_parent_id(args.target_parent_id)
                         if target_parent_id and r <= 1:
                             raise SystemExit("--target_parent_id is only valid for R2+ tree optimization.")
-                        # Guard: require results_filled.csv with actual data before generating R3+
+                        # Guard: require usable previous-round evidence before generating R3+.
+                        # Numeric COF supports optimization; explicit wet-lab failures support
+                        # failure-factor verification even when COF is unavailable.
                         if r > 2:
                             prev_results = round_out / f"R{r-1}_results_filled.csv"
                             if not prev_results.exists():
@@ -458,10 +574,20 @@ def main():
                                     (_r.get("cof_steady_mean") or "").strip()
                                     for _r in _rows
                                 )
-                                if not _has_data:
+                                _has_failure = _has_failure_signal(
+                                    _rows,
+                                    round_out / f"R{r-1}_experiment_notes.json",
+                                )
+                                if not _has_data and not _has_failure:
                                     raise SystemExit(
-                                        f"R{r} generation blocked: {prev_results.name} exists but has no COF data. "
-                                        f"Fill in experimental results for R{r-1} before generating R{r}."
+                                        f"R{r} generation blocked: {prev_results.name} has neither COF data "
+                                        f"nor explicit failure evidence. Fill in experimental results or "
+                                        f"R{r-1}_experiment_notes.json before generating R{r}."
+                                    )
+                                if _has_failure and not _has_data:
+                                    print(
+                                        f"[GUARD] R{r-1} has explicit failure evidence but no COF; "
+                                        f"proceeding to R{r} for failure-factor verification."
                                     )
                             except SystemExit:
                                 raise
@@ -529,11 +655,11 @@ def main():
                 write_json(kpi_log_path, kpi_log)
 
             try:
-                from .formula_tree import build_tree
-                from .tree_statistics import build_tree_statistics
-                from .chain_memory import build_chain_memory
-                from .tree_reports import build_tree_reports
-                from .tree_visualizer import build_tree_diagram
+                from pva_work_flow.tree.formula_tree import build_tree
+                from pva_work_flow.tree.tree_statistics import build_tree_statistics
+                from pva_work_flow.memory.chain_memory import build_chain_memory
+                from pva_work_flow.tree.tree_reports import build_tree_reports
+                from pva_work_flow.tree.tree_visualizer import build_tree_diagram
 
                 build_tree(round_out)
                 build_tree_statistics(round_out)

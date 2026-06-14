@@ -70,6 +70,60 @@
 ## 3. 工作流与数据流
 
 ```
+
+---
+
+```
+
+### 3.1 成功与失败样品同等重要
+
+本项目的核心目标不是让每一轮湿实验都成功，而是让每一次湿实验都转化为模型可学习的样本。成功样品是正样本，用来定义可行配方区域、有效变量方向和低摩擦/高稳定性的候选机制；失败样品是负样本，用来定义不可行边界、危险变量、材料不兼容关系和后续必须规避或单独验证的条件。
+
+因此，湿实验失败不应被视为无效数据。失败样品必须被结构化记录为负样本，进入 RAG 记忆，并参与后续 DOE 设计。特别是当样品破碎、未成胶、过软、过度溶胀或相分离时，系统需要做三件事：
+
+1. 记录失败模式：通过 `R{N}_experiment_notes.json`、`failure_type` 和 ERROR1-10 错误码记录真实湿实验现象。
+2. 拆分失败因素：由 `failure_factor_memory.py` 将失败样品中的变量变化拆成 suspected failure factors。
+3. 设计单因素验证：下一轮 `constrained_doe.py` 优先生成 `failure_factor_verification`，只改变一个 suspected factor。如果仍失败，则将该因素升级为 confirmed failure factor；如果不失败，则将该因素降级为 disproved 或 mixed，转而考虑组合效应。
+
+新增记忆文件：
+
+```text
+failure_factor_memory.jsonl      # suspected / confirmed / disproved / mixed 失败因子
+experiment_contrast_memory.jsonl # parent-child 正负样本对比
+rag_vector_index.json            # 本地向量化 RAG 索引
+FAILURE_FACTOR_SUMMARY.md        # 当前失败因子总结
+NEXT_VERIFICATION_PLAN.md        # 下一轮单因素验证计划
+```
+
+RAG 向量化：
+
+```text
+项目现在使用 hybrid RAG：结构化过滤和规则打分仍然作为主要安全层，
+rag_vector_index.json 提供额外的语义相似检索层。
+当前后端是本地 TF-IDF sparse vector + cosine similarity，
+不依赖联网、外部 embedding API 或模型下载。
+索引内容包括 failure_factor_memory.jsonl、experiment_contrast_memory.jsonl、
+tree_memory_cards.jsonl，以及 SQLite 文献 RAG 数据库中的 formulation_cases。
+这样成功样品和失败样品都可以作为正/负样本，被下一轮设计按语义相似度召回。
+```
+
+新增统计含义：
+
+```text
+positive_sample_count      # 有效、可测、可用于学习成功区域的样品数
+negative_sample_count      # 失败、破碎、未成胶等可用于学习不可行边界的样品数
+unsafe_factor_count        # suspected + confirmed failure factors 数量
+failure_mode_distribution  # 失败模式分布
+```
+
+设计原则：
+
+```text
+成功样品告诉模型“可以做什么”。
+失败样品告诉模型“不要做什么，以及下一轮应该验证什么”。
+两者共同定义真实可落地的实验可行域。
+```
+```text
 R1: 生成约10个root → 湿实验 → Bruker分析 → 诊断 → R1_diagnosis.json
                                                          ↓
 R2: 选择父节点 → constrained DOE骨架 → 3-Agent → 候选配方 → 审计 → 湿实验
@@ -119,7 +173,7 @@ rescue后仍下降 → kill（该分支停止扩展）
 | `baseline_reproduction` | 0（代码完全复制父配方） | 1 |
 | `single_factor_perturbation` | 恰好 1 | 2 |
 | `local_optimization` | 最多 2 | 1 |
-| `failure_verification` | 最多 1 | 0-1 |
+| `failure_factor_verification` | 最多 1 | 0-1 |
 | `limited_exploration` | ≤1 新材料 | 最多 1（默认关闭） |
 
 ### 4.3 硬性规则（代码层强制执行）

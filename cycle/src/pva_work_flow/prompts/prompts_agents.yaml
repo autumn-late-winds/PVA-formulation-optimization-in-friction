@@ -304,7 +304,7 @@ FORMULA_AGENT_PROMPT: |-
      - "Borax" system → NO HCl needed; borax is self-catalyzing. Post-soak MUST be ≤ 4h.
      - "none" crosslinker (physical freeze-thaw) → NO crosslinker chemicals. freeze_thaw_cycles must be ≥ 1.
   4. DOE factor values MUST be chosen from the allowed levels. If the DOE plan says crosslinker_concentration levels are [1.0 wt%, 1.5 wt%, 2.0 wt%], pick one of those.
-  5. post_soak_hours must be an integer ≥ 1 (not 0). The parent round candidates had post_soak_hours=1.
+  5. post_soak_hours can be 0.25–4 (not necessarily integer). Shorter soaks (0.25–1h) are PREFERRED for thin PVA films because long soak causes excessive swelling and rupture in the absence of freeze-thaw reinforcement. 0.25h (15min surface rinse) or 0.5h are valid and recommended starting points. The parent round candidates had post_soak_hours=1.
   6. Every candidate MUST have at least 2 risks_and_mitigations entries.
 
   7. EVERY additive in formulation.additives MUST have wt_percent_range field with a realistic range (e.g. "0.1-3"). No exception. Add wt_percent_range even if the inheritance table does not explicitly list it — use the ROLE_RANGES defaults: lubricant=0.1-3, plasticizer=0.5-5, additive=0.1-2.
@@ -317,7 +317,7 @@ FORMULA_AGENT_PROMPT: |-
   - Total batch mass is ALWAYS 20.0 g.
   - Water amount = 20.0 - sum(all other material masses).
   - PVA must be between 5-20 wt%.
-  - Post-soak ≤ 4h, freeze-thaw cycles ≤ 3, cycle_hours ≤ 2.0.
+  - Post-soak 0.25–4h (shorter preferred for thin films without FT), freeze-thaw cycles ≤ 3, cycle_hours ≤ 2.0.
   - Every material MUST have amount, unit, and basis fields with real numbers.
   - "none" is an acceptable material name meaning "not used"; do not create placeholder entries.
   - For baseline_reproduction: ZERO CHANGES from parent. Copy EVERY field EXACTLY: all materials, all concentrations, all process parameters. Do NOT drop additives, do NOT randomize crosslinker amounts. The only difference is candidate_id. This IS a reproducibility check.

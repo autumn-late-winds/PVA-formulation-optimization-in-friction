@@ -3,9 +3,9 @@ set -euo pipefail
 
 # Clean vLLM runner for multi-root, multi-candidate greedy-chain steps.
 # Edit the variables below, or override them from the shell:
-#   ROUND=2 bash pva_vllm.sh
-#   ROUND=2 REGENERATE=1 bash pva_vllm.sh
-#   ROUND=2 CHAIN_ROOT_IDS="R1-04 R1-03 R1-07" bash pva_vllm.sh
+#   ROUND=3 bash pva_vllm.sh
+#   ROUND=3 REGENERATE=1 bash pva_vllm.sh
+#   ROUND=3 CHAIN_ROOT_IDS="R1-04 R1-03 R1-07" bash pva_vllm.sh
 
 _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$_SCRIPT_DIR/../../.."
@@ -14,7 +14,7 @@ echo "[STAGE 1/4] Entered cycle workspace: $(pwd)"
 # conda activate myenv
 
 OUT_DIR="${OUT_DIR:-./src/sft_qwen3_14b_out}"
-ROUND="${ROUND:-2}"
+ROUND="${ROUND:-3}"
 REGENERATE="${REGENERATE:-}"
 SEED="${SEED:-7}"
 
@@ -33,6 +33,17 @@ fi
 CHAIN_CANDIDATES="${CHAIN_CANDIDATES:-3}"
 CHAIN_SELECT="${CHAIN_SELECT:-$CHAIN_CANDIDATES}"
 CHAIN_ACCEPT_DELTA="${CHAIN_ACCEPT_DELTA:--1e-6}"
+
+# Binary-midpoint local search defaults. Override from shell for multiplicative runs:
+#   PVA_CONSTRAINED_STEP_STRATEGY=multiplicative \
+#   PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR=0.75 \
+#   PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR=1.25 bash pva_vllm.sh
+export PVA_CONSTRAINED_STEP_STRATEGY="${PVA_CONSTRAINED_STEP_STRATEGY:-binary}"
+export PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR="${PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR:-0.5}"
+export PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR="${PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR:-2.0}"
+export PVA_CONSTRAINED_FREEZE_THAW_STEP="${PVA_CONSTRAINED_FREEZE_THAW_STEP:-2}"
+export PVA_CONSTRAINED_CHANGE_MAGNITUDE="${PVA_CONSTRAINED_CHANGE_MAGNITUDE:-binary_midpoint}"
+export PVA_POST_SOAK_RESCUE_FACTOR="${PVA_POST_SOAK_RESCUE_FACTOR:-0.5}"
 
 FORMULATION_RAG_DB="${FORMULATION_RAG_DB:-}"
 
@@ -94,6 +105,12 @@ echo "  chain_root_ids=$CHAIN_ROOT_IDS"
 echo "  chain_candidates=$CHAIN_CANDIDATES"
 echo "  chain_select=$CHAIN_SELECT"
 echo "  chain_accept_delta=$CHAIN_ACCEPT_DELTA"
+echo "  step_strategy=$PVA_CONSTRAINED_STEP_STRATEGY"
+echo "  numeric_decrease_factor=$PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR"
+echo "  numeric_increase_factor=$PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR"
+echo "  freeze_thaw_step=$PVA_CONSTRAINED_FREEZE_THAW_STEP"
+echo "  change_magnitude=$PVA_CONSTRAINED_CHANGE_MAGNITUDE"
+echo "  post_soak_rescue_factor=$PVA_POST_SOAK_RESCUE_FACTOR"
 echo "  vllm_model=$VLLM_MODEL_NAME"
 echo "  rag_db=${FORMULATION_RAG_DB:-auto}"
 
