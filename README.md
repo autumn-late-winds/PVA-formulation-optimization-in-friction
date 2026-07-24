@@ -92,13 +92,15 @@ python -m pva_work_flow.cli --out_dir run_out --status
 
 ## Local web console
 
-Run the local web console to work through project questions and formulation iterations in a browser:
+Run the local web console to work through project questions and formulation iterations in a browser. Start the fine-tuned Qwen 14B vLLM server first, then configure the console to use its OpenAI-compatible endpoint:
 
 ```bash
-python -m pva_work_flow.agent_server --out_dir run_out
+# PowerShell: $env:PVA_VLLM_API_KEY = "your-local-vllm-key"
+# bash/zsh:    export PVA_VLLM_API_KEY="your-local-vllm-key"
+python -m pva_work_flow.agent_server --out_dir run_out --vllm_base_url http://localhost:8000/v1 --vllm_model_name qwen3-14b-sft
 ```
 
-Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The **Research Q&A** panel searches the selected run directory's local experiment and formulation-memory index. The **Experiment formulation iteration** panel shows round status, recommended actions, artifacts, reports, and approved low-risk maintenance actions. The server binds to `127.0.0.1` by default, so neither research data nor questions leave the machine.
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The **Research Q&A** panel retrieves local project evidence and asks the fine-tuned Qwen 14B model to compose a grounded answer. The **Experiment formulation iteration** panel shows round status, recommended actions, artifacts, reports, and approved low-risk maintenance actions. The server binds to `127.0.0.1` by default, so neither research data nor questions leave the machine.
 
 ### Analyze a friction CSV
 

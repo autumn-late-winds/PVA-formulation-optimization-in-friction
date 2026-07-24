@@ -230,7 +230,14 @@ def main():
     if args.agent_server:
         from pva_work_flow.agent_server import run_server
 
-        run_server(args.agent_server_host, args.agent_server_port, out_dir)
+        run_server(
+            args.agent_server_host,
+            args.agent_server_port,
+            out_dir,
+            args.vllm_base_url,
+            args.vllm_api_key,
+            args.vllm_model_name,
+        )
         return
 
     if args.agent:

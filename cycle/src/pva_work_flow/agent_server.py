@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+import os
 
 from pva_work_flow.agent.planner import build_agent_advice
 from pva_work_flow.agent.policy import DEFAULT_POLICY
@@ -16,6 +17,7 @@ from pva_work_flow.agent.reports import render_agent_report
 from pva_work_flow.agent.tools import TOOL_REGISTRY, run_low_risk_tool
 from pva_work_flow.artifacts.artifact_store import RunWorkspace
 from pva_work_flow.core.utils import read_json, write_json
+from pva_work_flow.core.llm_engines import VllmOpenAIChatLLM
 from pva_work_flow.memory.vector_rag import ensure_project_vector_index, query_vector_index
 
 
@@ -127,30 +129,46 @@ def build_logs_payload(out_dir: Path, limit: int = 200) -> dict[str, Any]:
     }
 
 
-def answer_project_question(out_dir: Path, question: str) -> dict[str, Any]:
-    """Answer from local project memory without sending research data externally."""
+def answer_project_question(
+    out_dir: Path,
+    question: str,
+    *,
+    vllm_base_url: str,
+    vllm_api_key: str,
+    vllm_model_name: str,
+) -> dict[str, Any]:
+    """Answer with the fine-tuned Qwen model grounded in local project evidence."""
 
     question = question.strip()
     if not question:
         raise ValueError("Question is required")
-    if not out_dir.exists():
-        return {
-            "question": question,
-            "answer": "The selected run directory does not exist yet. Choose an existing run directory or start an iteration first.",
-            "sources": [],
-            "doc_count": 0,
-        }
-    index = ensure_project_vector_index(out_dir)
+    index = ensure_project_vector_index(out_dir) if out_dir.exists() else {}
     hits = query_vector_index(index, question, top_k=4)
-    if not hits:
-        answer = (
-            "No matching evidence was found in the current local run directory. "
-            "Build the vector index after importing experiment records, or ask about a recorded run."
-        )
-    else:
-        excerpts = [str(hit.get("text") or "").strip() for hit in hits]
-        answer = "\n\n".join(f"{i + 1}. {text}" for i, text in enumerate(excerpts))
-    return {"question": question, "answer": answer, "sources": hits, "doc_count": index.get("doc_count", 0)}
+    evidence = "\n\n".join(
+        f"[{i + 1}] {hit.get('source_type')}: {hit.get('text')}"
+        for i, hit in enumerate(hits)
+    ) or "No matching local project evidence was retrieved. State this limitation clearly."
+    llm = VllmOpenAIChatLLM(
+        base_url=vllm_base_url,
+        api_key=vllm_api_key,
+        model_name=vllm_model_name,
+        max_tokens=1200,
+        temperature=0.2,
+        timeout_s=120.0,
+    )
+    answer = llm.generate(
+        "You are the PVA formulation optimization research assistant. Answer in the user's language. "
+        "Use the supplied local evidence as the primary basis, do not invent measured results, and explicitly label uncertainty. "
+        "End with a concise, practical next step when appropriate.",
+        f"Question:\n{question}\n\nLocal evidence:\n{evidence}",
+    )
+    return {
+        "question": question,
+        "answer": answer,
+        "sources": hits,
+        "doc_count": index.get("doc_count", 0),
+        "model": vllm_model_name,
+    }
 
 
 def execute_low_risk_tool_payload(out_dir: Path, tool_name: str) -> dict[str, Any]:
@@ -186,7 +204,7 @@ def list_recent_artifacts(out_dir: Path, limit: int = 20) -> list[dict[str, Any]
     ]
 
 
-def create_handler(default_out_dir: Path) -> type[BaseHTTPRequestHandler]:
+def create_handler(default_out_dir: Path, qwen_config: dict[str, str]) -> type[BaseHTTPRequestHandler]:
     class AgentServerHandler(BaseHTTPRequestHandler):
         server_version = "PVAAgentServer/0.1"
 
@@ -229,7 +247,7 @@ def create_handler(default_out_dir: Path) -> type[BaseHTTPRequestHandler]:
                     self._send_json(execute_low_risk_tool_payload(out_dir, tool_name))
                 elif parsed.path == "/api/qa":
                     question = str(body.get("question") or "")
-                    self._send_json(answer_project_question(out_dir, question))
+                    self._send_json(answer_project_question(out_dir, question, **qwen_config))
                 else:
                     self._send_error(HTTPStatus.NOT_FOUND, f"Unknown endpoint: {parsed.path}")
             except PermissionError as exc:
@@ -285,8 +303,19 @@ def create_handler(default_out_dir: Path) -> type[BaseHTTPRequestHandler]:
     return AgentServerHandler
 
 
-def run_server(host: str, port: int, out_dir: Path) -> None:
-    handler = create_handler(out_dir)
+def run_server(
+    host: str,
+    port: int,
+    out_dir: Path,
+    vllm_base_url: str = "http://localhost:8000/v1",
+    vllm_api_key: str | None = None,
+    vllm_model_name: str = "qwen3-14b-sft",
+) -> None:
+    handler = create_handler(out_dir, {
+        "vllm_base_url": vllm_base_url,
+        "vllm_api_key": vllm_api_key or os.environ.get("PVA_VLLM_API_KEY", "token-abc123"),
+        "vllm_model_name": vllm_model_name,
+    })
     server = ThreadingHTTPServer((host, port), handler)
     print(f"[agent-server] serving http://{host}:{port}/")
     print(f"[agent-server] default out_dir={out_dir}")
@@ -298,6 +327,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--out_dir", default=DEFAULT_OUT_DIR)
+    parser.add_argument("--vllm_base_url", default="http://localhost:8000/v1")
+    parser.add_argument("--vllm_model_name", default="qwen3-14b-sft")
+    parser.add_argument("--vllm_api_key", default="")
     parser.add_argument("--check", action="store_true", help="Print state JSON and exit.")
     args = parser.parse_args(argv)
 
@@ -305,7 +337,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.check:
         print(json.dumps(build_state_payload(out_dir), ensure_ascii=False, indent=2))
         return
-    run_server(args.host, args.port, out_dir)
+    run_server(args.host, args.port, out_dir, args.vllm_base_url, args.vllm_api_key, args.vllm_model_name)
 
 
 def _resolve_out_dir(query: dict[str, list[str]], default_out_dir: Path) -> Path:
