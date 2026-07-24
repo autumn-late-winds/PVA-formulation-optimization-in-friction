@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="title desc">
+  <title id="title">PVA formulation optimization workflow</title>
+  <desc id="desc">A six-step closed loop for PVA formulation optimization.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 Z" fill="#16615a"/></marker>
+    <style>
+      .bg{fill:#f7f8f5}.title{font:700 38px Arial,sans-serif;fill:#202423}.sub{font:22px Arial,sans-serif;fill:#65706b}.box{fill:#fff;stroke:#16615a;stroke-width:3}.input{fill:#eef3ee}.decision{fill:#fff4df;stroke:#b84a35}.outcome{fill:#e8f4ee;stroke-width:4}.num{font:700 21px Arial,sans-serif;fill:#16615a}.head{font:700 27px Arial,sans-serif;fill:#202423}.body{font:20px Arial,sans-serif;fill:#65706b}.label{font:700 20px Arial,sans-serif;fill:#b84a35}.line{fill:none;stroke:#16615a;stroke-width:4;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect class="bg" width="1600" height="1180" rx="28"/>
+  <text class="title" x="800" y="70" text-anchor="middle">PVA Formulation Optimization: Closed-Loop Workflow</text>
+  <text class="sub" x="800" y="108" text-anchor="middle">Evidence-guided formulation design from constraints to validation</text>
+  <rect class="box input" x="105" y="170" width="600" height="120" rx="16"/>
+  <text class="head" x="145" y="218">Project inputs and memory</text><text class="body" x="145" y="255">Materials · process constraints · target metrics · prior evidence</text>
+  <rect class="box" x="105" y="370" width="600" height="125" rx="16"/>
+  <text class="num" x="145" y="414">01</text><text class="head" x="205" y="414">Generate constrained candidates</text><text class="body" x="205" y="452">Fine-tuned Qwen + constrained DoE</text>
+  <rect class="box" x="895" y="370" width="600" height="125" rx="16"/>
+  <text class="num" x="935" y="414">02</text><text class="head" x="995" y="414">Audit and prepare experiments</text><text class="body" x="995" y="452">Composition, processing, and feasibility checks</text>
+  <rect class="box" x="895" y="580" width="600" height="125" rx="16"/>
+  <text class="num" x="935" y="624">03</text><text class="head" x="995" y="624">Run wet-lab experiments</text><text class="body" x="995" y="662">Friction and compression measurements</text>
+  <rect class="box" x="105" y="580" width="600" height="125" rx="16"/>
+  <text class="num" x="145" y="624">04</text><text class="head" x="205" y="624">Process measurements</text><text class="body" x="205" y="662">Bruker CSV to structured performance metrics</text>
+  <rect class="box" x="105" y="790" width="600" height="125" rx="16"/>
+  <text class="num" x="145" y="834">05</text><text class="head" x="205" y="834">Diagnose and learn</text><text class="body" x="205" y="872">Failure analysis, reports, and optimization-tree memory</text>
+  <path class="decision" d="M1195 770 L1425 900 L1195 1030 L965 900 Z"/>
+  <text class="head" x="1195" y="890" text-anchor="middle">Converged?</text><text class="body" x="1195" y="924" text-anchor="middle">Target and robustness met</text>
+  <rect class="box outcome" x="105" y="1000" width="600" height="110" rx="16"/>
+  <text class="head" x="145" y="1045">06 · Validate formulation</text><text class="body" x="145" y="1080">Repeatability testing and verification plan</text>
+  <path class="line" d="M405 290 L405 360"/><path class="line" d="M705 432 L885 432"/><path class="line" d="M1195 495 L1195 570"/><path class="line" d="M895 642 L715 642"/><path class="line" d="M405 705 L405 780"/><path class="line" d="M705 852 L950 890"/>
+  <path class="line" d="M1050 1010 C900 1145 510 1160 405 925 C360 825 380 690 405 505"/>
+  <text class="label" x="715" y="1145">No: feed evidence into the next candidate round</text>
+  <path class="line" d="M965 900 L715 1035"/><text class="label" x="740" y="960">Yes</text>
+</svg>

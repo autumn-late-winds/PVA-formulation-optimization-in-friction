@@ -10,32 +10,7 @@ An LLM-assisted, closed-loop workflow for optimizing poly(vinyl alcohol) (PVA) h
 
 ## How the workflow works
 
-```mermaid
-%%{init: {'flowchart': {'nodeSpacing': 65, 'rankSpacing': 85}} }%%
-flowchart TB
-    A["<b>01 · Define the design space</b><br/>Materials, process constraints,<br/>and target friction metrics"]
-    M["<b>Project memory</b><br/>Experiment records, literature RAG,<br/>and prior tree knowledge"]
-    B["<b>02 · Generate candidates</b><br/>Fine-tuned Qwen + constrained DoE"]
-    C["<b>03 · Audit and prepare</b><br/>Composition, process, and wet-lab checks"]
-    D["<b>04 · Run wet-lab experiments</b><br/>Friction and compression measurements"]
-    E["<b>05 · Process measurements</b><br/>Bruker CSV to structured metrics"]
-    F["<b>06 · Diagnose and learn</b><br/>Failure analysis, reports, and tree memory"]
-    G{"<b>Converged?</b>"}
-    H["<b>Validate formulation</b><br/>Repeatability and verification plan"]
-    A --> B
-    M --> B
-    B --> C --> D --> E --> F --> G
-    G -- "No: update evidence" --> B
-    G -- "Yes" --> H
-    classDef input fill:#eef3ee,stroke:#16615a,stroke-width:2px,color:#202423;
-    classDef action fill:#ffffff,stroke:#16615a,stroke-width:2px,color:#202423;
-    classDef decision fill:#fff4df,stroke:#b84a35,stroke-width:2px,color:#202423;
-    classDef outcome fill:#e8f4ee,stroke:#16615a,stroke-width:3px,color:#202423;
-    class A,M input;
-    class B,C,D,E,F action;
-    class G decision;
-    class H outcome;
-```
+![PVA formulation optimization workflow](assets/workflow-overview.svg)
 
 The loop preserves each round's formulation, measurements, audit results, and rationale so the next experiment is traceable to the evidence that motivated it.
 
