@@ -2,7 +2,7 @@
 
 An LLM-assisted, closed-loop workflow for optimizing poly(vinyl alcohol) (PVA) hydrogel formulations for low-friction applications. The project turns formulation constraints, tribology measurements, and experimental observations into traceable candidate formulations and the next-round wet-lab plan.
 
-<a href="./assets/web-console-preview.png"><img src="./assets/web-console-preview.png" alt="PVA Formulation Lab web console preview"></a>
+![PVA Formulation Lab web console preview](./assets/web-console-preview.png)
 
 *Web console preview. The formulations, Q&A response, and citations shown above are fictional demonstration content, not project data.*
 
@@ -10,7 +10,7 @@ An LLM-assisted, closed-loop workflow for optimizing poly(vinyl alcohol) (PVA) h
 
 ## How the workflow works
 
-<a href="./assets/workflow-overview.png"><img src="./assets/workflow-overview.png" alt="PVA formulation optimization workflow"></a>
+![PVA formulation optimization workflow](./assets/workflow-overview.png)
 
 The loop preserves each round's formulation, measurements, audit results, and rationale so the next experiment is traceable to the evidence that motivated it.
 
