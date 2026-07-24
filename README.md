@@ -90,6 +90,16 @@ Check the state of a completed or in-progress run:
 python -m pva_work_flow.cli --out_dir run_out --status
 ```
 
+## Local web console
+
+Run the local web console to work through project questions and formulation iterations in a browser:
+
+```bash
+python -m pva_work_flow.agent_server --out_dir run_out
+```
+
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The **Research Q&A** panel searches the selected run directory's local experiment and formulation-memory index. The **Experiment formulation iteration** panel shows round status, recommended actions, artifacts, reports, and approved low-risk maintenance actions. The server binds to `127.0.0.1` by default, so neither research data nor questions leave the machine.
+
 ### Analyze a friction CSV
 
 ```bash

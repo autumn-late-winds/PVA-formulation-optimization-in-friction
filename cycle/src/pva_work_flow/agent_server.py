@@ -16,6 +16,7 @@ from pva_work_flow.agent.reports import render_agent_report
 from pva_work_flow.agent.tools import TOOL_REGISTRY, run_low_risk_tool
 from pva_work_flow.artifacts.artifact_store import RunWorkspace
 from pva_work_flow.core.utils import read_json, write_json
+from pva_work_flow.memory.vector_rag import ensure_project_vector_index, query_vector_index
 
 
 DEFAULT_OUT_DIR = "run_out"
@@ -126,6 +127,32 @@ def build_logs_payload(out_dir: Path, limit: int = 200) -> dict[str, Any]:
     }
 
 
+def answer_project_question(out_dir: Path, question: str) -> dict[str, Any]:
+    """Answer from local project memory without sending research data externally."""
+
+    question = question.strip()
+    if not question:
+        raise ValueError("Question is required")
+    if not out_dir.exists():
+        return {
+            "question": question,
+            "answer": "The selected run directory does not exist yet. Choose an existing run directory or start an iteration first.",
+            "sources": [],
+            "doc_count": 0,
+        }
+    index = ensure_project_vector_index(out_dir)
+    hits = query_vector_index(index, question, top_k=4)
+    if not hits:
+        answer = (
+            "No matching evidence was found in the current local run directory. "
+            "Build the vector index after importing experiment records, or ask about a recorded run."
+        )
+    else:
+        excerpts = [str(hit.get("text") or "").strip() for hit in hits]
+        answer = "\n\n".join(f"{i + 1}. {text}" for i, text in enumerate(excerpts))
+    return {"question": question, "answer": answer, "sources": hits, "doc_count": index.get("doc_count", 0)}
+
+
 def execute_low_risk_tool_payload(out_dir: Path, tool_name: str) -> dict[str, Any]:
     if tool_name not in DEFAULT_POLICY.low_risk_auto_actions:
         raise PermissionError(f"{tool_name} is not listed as a low-risk auto action")
@@ -200,6 +227,9 @@ def create_handler(default_out_dir: Path) -> type[BaseHTTPRequestHandler]:
                         self._send_error(HTTPStatus.BAD_REQUEST, "Missing tool")
                         return
                     self._send_json(execute_low_risk_tool_payload(out_dir, tool_name))
+                elif parsed.path == "/api/qa":
+                    question = str(body.get("question") or "")
+                    self._send_json(answer_project_question(out_dir, question))
                 else:
                     self._send_error(HTTPStatus.NOT_FOUND, f"Unknown endpoint: {parsed.path}")
             except PermissionError as exc:
@@ -315,7 +345,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PVA Agent Console</title>
+  <title>PVA Formulation Lab</title>
   <style>
     :root {
       color-scheme: light;
@@ -370,6 +400,10 @@ DASHBOARD_HTML = r"""<!doctype html>
       border-radius: 4px;
       font-size: 14px;
     }
+    textarea { width: 100%; margin: 6px 0 10px; padding: 10px; resize: vertical; border: 1px solid var(--line); border-radius: 4px; font: inherit; line-height: 1.45; }
+    .muted { color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .sources { display: grid; gap: 6px; margin-top: 10px; }
+    .source { padding: 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 12px; color: var(--muted); }
     button {
       border: 1px solid var(--accent);
       background: var(--accent);
@@ -435,7 +469,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>PVA Agent Console</h1>
+    <h1>PVA Formulation Lab <span class="badge">local-only</span></h1>
     <div class="row">
       <label for="outDir">out_dir</label>
       <input id="outDir" value="run_out">
@@ -445,7 +479,16 @@ DASHBOARD_HTML = r"""<!doctype html>
   <main>
     <div class="stack">
       <section>
-        <h2>Agent</h2>
+        <h2>Research Q&amp;A</h2>
+        <p class="muted">Searches the local experiment and formulation-memory index only.</p>
+        <label for="question">Question</label>
+        <textarea id="question" rows="4" placeholder="Which factors were associated with low friction in prior rounds?"></textarea>
+        <div class="row"><button id="askBtn">Ask project memory</button><span id="qaStatus" class="muted"></span></div>
+        <pre id="answer">Ask a question to search the selected run directory.</pre>
+        <div id="sources" class="sources"></div>
+      </section>
+      <section>
+        <h2>Experiment formulation iteration</h2>
         <div class="row">
           <span id="stateBadge" class="badge">loading</span>
           <span id="riskBadge" class="badge">risk</span>
@@ -454,7 +497,7 @@ DASHBOARD_HTML = r"""<!doctype html>
         <pre id="command"></pre>
       </section>
       <section>
-        <h2>Low-risk Tools</h2>
+        <h2>Iteration utilities</h2>
         <div id="tools" class="stack"></div>
       </section>
       <section>
@@ -491,6 +534,11 @@ DASHBOARD_HTML = r"""<!doctype html>
     const artifacts = document.getElementById("artifacts");
     const tree = document.getElementById("tree");
     const logs = document.getElementById("logs");
+    const question = document.getElementById("question");
+    const askBtn = document.getElementById("askBtn");
+    const answer = document.getElementById("answer");
+    const sources = document.getElementById("sources");
+    const qaStatus = document.getElementById("qaStatus");
 
     async function getJson(path) {
       const outDir = encodeURIComponent(outDirInput.value || "run_out");
@@ -577,6 +625,35 @@ DASHBOARD_HTML = r"""<!doctype html>
       await refresh();
     }
 
+    async function askQuestion() {
+      const prompt = question.value.trim();
+      if (!prompt) { question.focus(); return; }
+      askBtn.disabled = true;
+      qaStatus.textContent = "Searching local memory…";
+      try {
+        const res = await fetch("/api/qa", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({question: prompt, out_dir: outDirInput.value || "run_out"})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Question failed");
+        answer.textContent = data.answer;
+        sources.innerHTML = (data.sources || []).map((source, index) => {
+          const meta = source.metadata || {};
+          const label = meta.candidate_id || meta.case_id || meta.factor_id || source.doc_id;
+          return `<div class="source"><strong>${index + 1}. ${label}</strong> · ${source.source_type} · relevance ${source.score}</div>`;
+        }).join("") || "<div class=\"source\">No source records matched.</div>";
+        qaStatus.textContent = `${data.doc_count || 0} local records indexed`;
+      } catch (err) {
+        answer.textContent = `Error: ${err}`;
+        sources.innerHTML = "";
+        qaStatus.textContent = "";
+      } finally {
+        askBtn.disabled = false;
+      }
+    }
+
     function renderTree(data) {
       const file = (data.files || []).find(f => f.exists && f.text_preview) || {};
       tree.textContent = file.text_preview || "No tree report found.";
@@ -592,6 +669,10 @@ DASHBOARD_HTML = r"""<!doctype html>
     }
 
     refreshBtn.onclick = refresh;
+    askBtn.onclick = askQuestion;
+    question.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") askQuestion();
+    });
     refresh();
   </script>
 </body>
