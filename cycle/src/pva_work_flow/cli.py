@@ -96,14 +96,14 @@ def _run_build_results(build_dir: str, out_dir: Path) -> None:
             candidate_csv_map[cid] = sorted(paths)
             print(f"  [INFO] {cid}: {len(paths)} repeats -> {[p.name for p in candidate_csv_map[cid]]}")
 
-        compression_map: dict[str, Path] = {}
+        compression_map: dict[str, list[Path]] = {}
         comp_dir = base_dir / f"R{rn}_compression"
         if comp_dir.is_dir():
-            for comp_file in comp_dir.glob("*.csv"):
+            for comp_file in sorted(comp_dir.glob("*.csv")):
                 m = re.match(r"^(\d+)", comp_file.stem)
                 if m:
                     cid = f"R{rn}-{int(m.group(1)):02d}"
-                    compression_map[cid] = comp_file
+                    compression_map.setdefault(cid, []).append(comp_file)
                     print(f"  [INFO] compression: {cid} <- {comp_file.name}")
 
         results_path = build_results_from_bruker_csvs(out_dir, rn, candidate_csv_map, compression_map)
@@ -217,7 +217,7 @@ def main():
     ap.add_argument("--agent_server_host", default="127.0.0.1", help="Host for --agent_server")
     ap.add_argument("--agent_server_port", type=int, default=8765, help="Port for --agent_server")
     # ---- Convergence criteria (override defaults in config.py) ----
-    ap.add_argument("--conv_cof_max", type=float, default=None, help="Convergence: max COF to declare convergence (default 0.02)")
+    ap.add_argument("--conv_cof_max", type=float, default=None, help="Convergence: max COF to declare convergence (default 0.06)")
     ap.add_argument("--conv_modulus_min", type=float, default=None, help="Convergence: min compression modulus MPa (default 1.5)")
     ap.add_argument("--conv_modulus_max", type=float, default=None, help="Convergence: max compression modulus MPa (default 2.5)")
     ap.add_argument("--conv_stable_proportion", type=float, default=None, help="Convergence: min stable_proportion (default 0.6)")
@@ -262,6 +262,7 @@ def main():
         ("stick_slip_max", args.conv_stick_slip_max),
         ("cof_trend_delta", args.conv_cof_trend_delta),
         ("cof_trend_consecutive", args.conv_cof_trend_rounds),
+        ("flat_trend_consecutive", args.conv_cof_trend_rounds),
     ]
     for key, val in _conv_map:
         if val is not None:
@@ -557,6 +558,18 @@ def main():
                         target_parent_id = target_parent_id or resolve_target_parent_id(args.target_parent_id)
                         if target_parent_id and r <= 1:
                             raise SystemExit("--target_parent_id is only valid for R2+ tree optimization.")
+                        if r > 1:
+                            prev_diag_for_stop = round_out / f"R{r-1}_diagnosis.json"
+                            if prev_diag_for_stop.exists():
+                                try:
+                                    prev_conv = read_json(prev_diag_for_stop).get("convergence", {})
+                                except Exception:
+                                    prev_conv = {}
+                                if prev_conv.get("should_stop"):
+                                    raise SystemExit(
+                                        f"R{r} generation blocked: R{r-1} termination rule says stop. "
+                                        f"{prev_conv.get('recommendation', '')}"
+                                    )
                         # Guard: require usable previous-round evidence before generating R3+.
                         # Numeric COF supports optimization; explicit wet-lab failures support
                         # failure-factor verification even when COF is unavailable.
@@ -654,6 +667,11 @@ def main():
                 kpi_log[:] = [x for x in kpi_log if x.get("round") != r] + [kpi]
                 write_json(kpi_log_path, kpi_log)
 
+                conv = read_json(diag_path).get("convergence", {})
+                if args.mode == "full" and conv.get("should_stop"):
+                    print(f"[STOP] R{r}: {conv.get('recommendation')}")
+                    return False
+
             try:
                 from pva_work_flow.tree.formula_tree import build_tree
                 from pva_work_flow.tree.tree_statistics import build_tree_statistics
@@ -682,7 +700,7 @@ def main():
         if args.mode == "full":
             for r in range(1, args.rounds + 1):
                 if not one_round(r):
-                    print(f"[STOP] Pipeline stopped after R{r}; no usable candidates for the next round.")
+                    print(f"[STOP] Pipeline stopped after R{r}.")
                     break
         else:
             one_round(args.round)

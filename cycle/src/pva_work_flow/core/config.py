@@ -89,13 +89,19 @@ ACCEPTANCE = {
 # When ALL criteria are met, the system declares convergence and recommends
 # entering robustness/repeatability validation instead of further iteration.
 CONVERGENCE = {
-    "cof_max": 0.02,             # steady-state COF must be <= this value
+    "cof_max": 0.06,             # target hit: steady-state COF must be <= this value
     "modulus_min_mpa": 1.5,      # compression modulus lower bound (MPa)
     "modulus_max_mpa": 2.5,      # compression modulus upper bound (MPa)
     "stable_proportion_min": 0.6, # fraction of half-cycles with clear plateaus
     "stick_slip_max": 0.2,       # high-frequency oscillation score upper bound
-    "cof_trend_delta": 0.005,    # |COF_round - COF_prev_round| below this = flat
-    "cof_trend_consecutive": 2,  # number of consecutive flat rounds to declare convergence
+    "min_replicates_for_success": 3,
+    "cof_trend_delta": 0.005,    # flat: best COF changes less than this
+    "cvs_trend_delta": 5.0,      # flat: best CVS changes less than this
+    "flat_trend_consecutive": 2, # stop branch after this many flat rounds
+    "cof_trend_consecutive": 2,  # backward-compatible alias for older CLI args
+    "failure_rate_stop": 0.5,    # stop branch after repeated >=50% failed candidates
+    "failure_rate_consecutive": 2,
+    "max_round": 8,              # stop local tweaking if no target hit by this round
 }
 
 # Budget and stage configuration (mirrors constrained_planning_policy.yaml)

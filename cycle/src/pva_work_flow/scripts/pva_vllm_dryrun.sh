@@ -36,6 +36,17 @@ CHAIN_CANDIDATES="${CHAIN_CANDIDATES:-3}"
 CHAIN_SELECT="${CHAIN_SELECT:-$CHAIN_CANDIDATES}"
 CHAIN_ACCEPT_DELTA="${CHAIN_ACCEPT_DELTA:--1e-6}"
 
+RUN_MODE="${RUN_MODE:-auto}"
+if [ "$RUN_MODE" = "auto" ]; then
+  if [ "$ROUND" -ge 4 ]; then
+    EFFECTIVE_RUN_MODE="direct"
+  else
+    EFFECTIVE_RUN_MODE="chain"
+  fi
+else
+  EFFECTIVE_RUN_MODE="$RUN_MODE"
+fi
+
 export PVA_CONSTRAINED_STEP_STRATEGY="${PVA_CONSTRAINED_STEP_STRATEGY:-binary}"
 export PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR="${PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR:-0.5}"
 export PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR="${PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR:-2.0}"
@@ -44,6 +55,9 @@ export PVA_CONSTRAINED_CHANGE_MAGNITUDE="${PVA_CONSTRAINED_CHANGE_MAGNITUDE:-bin
 export PVA_POST_SOAK_RESCUE_FACTOR="${PVA_POST_SOAK_RESCUE_FACTOR:-0.5}"
 
 FORMULATION_RAG_DB="${FORMULATION_RAG_DB:-}"
+if [ -z "$FORMULATION_RAG_DB" ] && [ -f "../数据库/formulation_optimization_cases_agent_reviewed/formulation_rag_agent_reviewed.sqlite" ]; then
+  FORMULATION_RAG_DB="../数据库/formulation_optimization_cases_agent_reviewed/formulation_rag_agent_reviewed.sqlite"
+fi
 
 CONV_COF_MAX="${CONV_COF_MAX:-0.02}"
 CONV_MODULUS_MIN="${CONV_MODULUS_MIN:-1.5}"
@@ -72,6 +86,7 @@ echo "  chain_root_ids     = $CHAIN_ROOT_IDS"
 echo "  chain_candidates   = $CHAIN_CANDIDATES"
 echo "  chain_select       = $CHAIN_SELECT"
 echo "  chain_accept_delta = $CHAIN_ACCEPT_DELTA"
+echo "  run_mode           = $EFFECTIVE_RUN_MODE"
 echo "  step_strategy      = $PVA_CONSTRAINED_STEP_STRATEGY"
 echo "  numeric_decrease   = $PVA_CONSTRAINED_NUMERIC_DECREASE_FACTOR"
 echo "  numeric_increase   = $PVA_CONSTRAINED_NUMERIC_INCREASE_FACTOR"
@@ -90,6 +105,25 @@ echo "  conv_stick_slip    = $CONV_STICK_SLIP_MAX"
 echo "  conv_cof_trend_d   = $CONV_COF_TREND_DELTA"
 echo "  conv_cof_trend_r   = $CONV_COF_TREND_ROUNDS"
 echo ""
+
+python - <<'PY'
+import os
+import sys
+sys.path.insert(0, "src")
+try:
+    from pva_work_flow.memory.formulation_rag import formulation_rag_enabled, resolve_formulation_rag_db
+    db = resolve_formulation_rag_db(os.environ.get("FORMULATION_RAG_DB") or None)
+    print("[STEP 2.5/5] RAG preflight")
+    print(f"  formulation_rag_enabled   = {formulation_rag_enabled()}")
+    print(f"  formulation_rag_db        = {db}")
+    print(f"  formulation_rag_db_exists = {db.exists()}")
+    if not db.exists():
+        print("  WARNING: external formulation-literature SQLite DB is missing; set FORMULATION_RAG_DB to enable it.")
+except Exception as exc:
+    print("[STEP 2.5/5] RAG preflight")
+    print(f"  WARNING: formulation RAG preflight failed: {exc}")
+print("")
+PY
 
 # --- chain_run_dir_for_root (mirrors pva_vllm.sh) ---
 chain_run_dir_for_root() {
@@ -116,7 +150,12 @@ for root_id in $CHAIN_ROOT_IDS; do
     status="OK"
     # Count existing ROUND files for archive preview
     r_count=$(find "$run_dir" -maxdepth 1 -name "R${ROUND}_*" 2>/dev/null | wc -l)
-    extra="(${r_count} R${ROUND}_* files present)"
+    if [ -f "$run_dir/rag_vector_index.json" ]; then
+      rag_extra=", vector RAG present"
+    else
+      rag_extra=", vector RAG missing"
+    fi
+    extra="(${r_count} R${ROUND}_* files present${rag_extra})"
   else
     status="MISSING"
     ALL_OK=false
@@ -156,6 +195,13 @@ FIRST_ROOT="${CHAIN_ROOT_IDS%% *}"
 FIRST_RUN_DIR="$(chain_run_dir_for_root "$FIRST_ROOT")"
 echo "  Root:      $FIRST_ROOT"
 echo "  Run dir:   $FIRST_RUN_DIR"
+if [ "$EFFECTIVE_RUN_MODE" = "direct" ]; then
+  SAMPLE_OUT_DIR="$FIRST_RUN_DIR"
+  SAMPLE_MODE_ARGS=""
+else
+  SAMPLE_OUT_DIR="$OUT_DIR"
+  SAMPLE_MODE_ARGS="--chain_search --chain_root_id \"$FIRST_ROOT\" --chain_accept_delta=\"$CHAIN_ACCEPT_DELTA\""
+fi
 echo ""
 echo "  --- generate command ---"
 echo "  python -c \"import sys; sys.path.insert(0, 'src'); import pva_work_flow.cli; pva_work_flow.cli.main()\" \\"
@@ -163,13 +209,13 @@ echo "    --engine vllm \\"
 echo "    --vllm_base_url \"$VLLM_BASE_URL\" \\"
 echo "    --vllm_model_name \"$VLLM_MODEL_NAME\" \\"
 echo "    --vllm_timeout_s \"$VLLM_TIMEOUT_S\" \\"
-echo "    --out_dir \"$OUT_DIR\" \\"
+echo "    --out_dir \"$SAMPLE_OUT_DIR\" \\"
 echo "    --seed \"$SEED\" \\"
 echo "    --mode generate \\"
 echo "    --round \"$ROUND\" \\"
-echo "    --chain_search \\"
-echo "    --chain_root_id \"$FIRST_ROOT\" \\"
-echo "    --chain_accept_delta=\"$CHAIN_ACCEPT_DELTA\" \\"
+if [ -n "$SAMPLE_MODE_ARGS" ]; then
+  echo "    $SAMPLE_MODE_ARGS \\"
+fi
 echo "    --n_candidates \"$CHAIN_CANDIDATES\" \\"
 echo "    --n_select \"$CHAIN_SELECT\" \\"
 if [ -n "$FORMULATION_RAG_DB" ]; then
@@ -184,7 +230,7 @@ echo "    --conv_cof_trend_delta \"$CONV_COF_TREND_DELTA\" \\"
 echo "    --conv_cof_trend_rounds \"$CONV_COF_TREND_ROUNDS\""
 echo ""
 echo "  --- prepare command ---"
-echo "  python -c \"...\" --mode prepare --round \"$ROUND\" --chain_search --chain_root_id \"$FIRST_ROOT\" ..."
+echo "  python -c \"...\" --mode prepare --round \"$ROUND\" --out_dir \"$SAMPLE_OUT_DIR\" ${SAMPLE_MODE_ARGS:+$SAMPLE_MODE_ARGS }..."
 echo ""
 
 # --- Summary ---

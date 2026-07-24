@@ -2,6 +2,7 @@
 
 import csv
 import re
+import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -434,8 +435,14 @@ def parse_compression_csv(csv_path: Path) -> Dict[str, Any]:
                 except ValueError:
                     pass
 
-            # If two parts and looks like key,value metadata
-            if len(parts) == 2 and not any(c in parts[0] for c in ("mm/mm", "MPa", "mm)", "N)", "s)", "mm/s")):
+            header_markers = (
+                "mm/mm", "MPa", "mm)", "N)", "s)", "mm/s",
+                "应变", "應變", "应力", "應力", "位移", "时间", "時間", "速度", "变形", "變形",
+            )
+            # If exactly two comma-separated fields and looks like key,value metadata.
+            # Multi-column non-numeric rows are data headers, even when Chinese
+            # labels are mojibake from the instrument export encoding.
+            if len(num_parts) == 2 and len(parts) == 2 and not any(c in parts[0] for c in header_markers):
                 metadata[parts[0].strip()] = parts[1].strip()
             else:
                 # This is the column header
@@ -445,7 +452,7 @@ def parse_compression_csv(csv_path: Path) -> Dict[str, Any]:
 
     # Extract column names from header
     col_names = [c.strip() for c in header_line.split(",")]
-    if not col_names:
+    if not col_names or len(col_names) < 2:
         # Fallback: guess column order
         col_names = ["strain", "stress_MPa", "displacement_mm", "force_N", "force_Y_N", "time_s", "speed_mm_s"]
 
@@ -463,17 +470,21 @@ def parse_compression_csv(csv_path: Path) -> Dict[str, Any]:
             continue
 
     # Build numpy arrays for key columns
-    strain_col = next((c for c in col_names if "mm/mm" in c), col_names[0])
-    stress_col = next((c for c in col_names if "MPa" in c), col_names[1])
-    displacement_col = next((c for c in col_names if "mm)" in c), col_names[2])
-    force_col = next((c for c in col_names if "N)" in c or "N," in c), col_names[3])
-    time_col = next((c for c in col_names if "s)" in c), col_names[5])
+    strain_col = next((c for c in col_names if "mm/mm" in c or "应变" in c or "應變" in c), col_names[0])
+    stress_col = next((c for c in col_names if "MPa" in c or "应力" in c or "應力" in c), col_names[1])
+    displacement_col = next((c for c in col_names if "mm)" in c or "位移" in c), col_names[2])
+    force_col = next((c for c in col_names if "N)" in c or "N," in c or c in ("力(N)", "力Y(N)")), col_names[3])
+    time_col = next((c for c in col_names if "s)" in c or "时间" in c or "時間" in c), col_names[5])
 
     strain = np.array([r.get(strain_col, np.nan) for r in records], dtype=np.float64)
     stress = np.array([r.get(stress_col, np.nan) for r in records], dtype=np.float64)
     displacement = np.array([r.get(displacement_col, np.nan) for r in records], dtype=np.float64)
     force = np.array([r.get(force_col, np.nan) for r in records], dtype=np.float64)
     time = np.array([r.get(time_col, np.nan) for r in records], dtype=np.float64)
+    strain_unit = "fraction"
+    if "%" in strain_col:
+        strain = strain / 100.0
+        strain_unit = "percent"
 
     return {
         "metadata": metadata,
@@ -481,6 +492,7 @@ def parse_compression_csv(csv_path: Path) -> Dict[str, Any]:
         "thickness": float(metadata.get("Thickness", 0)),
         "width": float(metadata.get("Width", 0)),
         "strain": strain,
+        "strain_unit": strain_unit,
         "stress": stress,
         "displacement": displacement,
         "force": force,
@@ -676,7 +688,7 @@ def build_results_from_bruker_csvs(
     out_dir: Path,
     round_idx: int,
     candidate_csv_map: Dict[str, List[Path]],
-    compression_map: Dict[str, Path] | None = None,
+    compression_map: Dict[str, Path | List[Path]] | None = None,
 ) -> Path:
     """Build a results_filled.csv from multiple Bruker CSV files.
 
@@ -684,7 +696,7 @@ def build_results_from_bruker_csvs(
         out_dir: output directory
         round_idx: round number (e.g., 2 for R2)
         candidate_csv_map: {candidate_id: [path_to_repeat1.csv, path_to_repeat2.csv, ...]}
-        compression_map: optional {candidate_id: path_to_compression.csv} for modulus
+        compression_map: optional {candidate_id: path_or_paths_to_compression.csv} for modulus
 
     Returns:
         Path to the generated results_filled.csv
@@ -736,15 +748,33 @@ def build_results_from_bruker_csvs(
             row["cof_std"] = str(round(overall_std, 6))
 
         # Compression modulus
-        comp_path = compression_map.get(cid)
-        if comp_path and comp_path.exists():
-            comp = parse_compression_csv(comp_path)
-            mod_result = compute_compression_modulus(comp)
-            if mod_result.get("modulus_MPa") is not None:
-                row["compression_modulus_MPa"] = str(mod_result["modulus_MPa"])
-                print(f"[INFO] {cid}: modulus = {mod_result['modulus_MPa']} MPa (R2={mod_result['r_squared']}, strain {mod_result['strain_range_used'][0]:.3f}-{mod_result['strain_range_used'][1]:.3f})")
+        comp_paths_raw = compression_map.get(cid)
+        if comp_paths_raw:
+            comp_paths = comp_paths_raw if isinstance(comp_paths_raw, list) else [comp_paths_raw]
+            mod_values = []
+            for comp_path in sorted(comp_paths):
+                if not comp_path.exists():
+                    continue
+                comp = parse_compression_csv(comp_path)
+                mod_result = compute_compression_modulus(comp)
+                if mod_result.get("modulus_MPa") is not None:
+                    mod_values.append(float(mod_result["modulus_MPa"]))
+                    print(
+                        f"[INFO] {cid}: {comp_path.name} modulus = {mod_result['modulus_MPa']} MPa "
+                        f"(R2={mod_result['r_squared']}, strain {mod_result['strain_range_used'][0]:.5f}-{mod_result['strain_range_used'][1]:.5f})"
+                    )
+                else:
+                    print(f"[WARN] {cid}: could not compute modulus from {comp_path.name}: {mod_result.get('error')}")
+            if mod_values:
+                row["compression_modulus_MPa"] = str(round(float(np.mean(mod_values)), 4))
+                row["compression_modulus_std_MPa"] = str(round(statistics.stdev(mod_values), 4)) if len(mod_values) > 1 else "0.0"
+                row["compression_modulus_n"] = str(len(mod_values))
+                print(
+                    f"[INFO] {cid}: modulus mean = {row['compression_modulus_MPa']} MPa "
+                    f"(std={row['compression_modulus_std_MPa']}, n={row['compression_modulus_n']})"
+                )
             else:
-                print(f"[WARN] {cid}: could not compute modulus from {comp_path.name}: {mod_result.get('error')}")
+                row.setdefault("compression_modulus_MPa", "")
         else:
             row.setdefault("compression_modulus_MPa", "")
 
@@ -810,7 +840,7 @@ def build_results_from_bruker_csvs(
         "COF_mean_1", "COF_std_1",
         "COF_mean_2", "COF_std_2",
         "COF_mean_3", "COF_std_3",
-        "wear_proxy", "compression_modulus_MPa",
+        "wear_proxy", "compression_modulus_MPa", "compression_modulus_std_MPa", "compression_modulus_n",
         "failure_type", "failure_time_min",
         "plateau_ratio", "pos_plateau_ratio", "neg_plateau_ratio",
         "asymmetry", "cv_amplitude", "stick_slip_score",

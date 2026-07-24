@@ -116,6 +116,16 @@ INTEGRITY_BY_ERROR: dict[str, float] = {
 # Default when error_codes are unknown but failure_type column indicates failure
 DEFAULT_FAILURE_INTEGRITY = 0.30
 
+# Critical failures make the tribology metrics non-comparable. For example,
+# rupture can produce an artificially low COF after the contact has already
+# failed, so these rows receive a fixed low score instead of being ranked by
+# COF/wear/modulus.
+FIXED_CVS_BY_CRITICAL_ERROR: dict[str, float] = {
+    "ERROR1": 5.0,   # rupture during friction: COF is not a valid success metric
+    "ERROR2": 0.0,   # no gelation
+    "ERROR3": 3.0,   # too soft to clamp/test reliably
+}
+
 # Performance sub-score weights
 W_COF = 0.40
 W_WEAR = 0.25
@@ -133,6 +143,8 @@ WEAR_CAP = 50.0           # wear_proxy above this → f_wear → 0
 MODULUS_TARGET = 2.0      # ideal compression modulus (MPa), Gaussian centre
 MODULUS_SIGMA = 1.5       # Gaussian width
 COF_STD_CAP = 0.05        # COF_std above this → f_cof_std → 0
+MISSING_MODULUS_SCORE = 0.20
+MISSING_MODULUS_CVS_CAP = 30.0
 
 
 def _safe_float(row: Mapping[str, Any], key: str) -> float | None:
@@ -253,6 +265,26 @@ def compute_cvs(
                 if code not in resolved_codes:
                     resolved_codes.append(code)
 
+    critical_scores = [
+        FIXED_CVS_BY_CRITICAL_ERROR[code.strip().upper()]
+        for code in resolved_codes
+        if code.strip().upper() in FIXED_CVS_BY_CRITICAL_ERROR
+    ]
+    if critical_scores:
+        fixed_cvs = min(critical_scores)
+        result.update({
+            "cvs": fixed_cvs,
+            "i_multiplier": 0.0,
+            "p_score": 0.0,
+            "s_score": 0.0,
+            "grade": "F",
+        })
+        result["warnings"].append(
+            f"Critical mechanical failure: fixed CVS={fixed_cvs:.1f}; "
+            f"COF not used for ranking (codes={resolved_codes})"
+        )
+        return result
+
     # ---- I: Integrity ----
     ft_col = _norm(row.get("failure_type"))
     i = integrity_multiplier(resolved_codes, ft_col)
@@ -274,8 +306,15 @@ def compute_cvs(
 
     f_cof_val = _f_cof(cof) if cof is not None else 0.0
     f_wear_val = _f_wear(wear) if wear is not None else 0.5   # neutral if missing
-    f_modulus_val = _f_modulus(modulus) if modulus is not None else 0.5
+    f_modulus_val = _f_modulus(modulus) if modulus is not None else MISSING_MODULUS_SCORE
     f_cof_std_val = _f_cof_std(cof_std) if cof_std is not None else 0.5
+    missing_modulus = modulus is None
+
+    if missing_modulus:
+        result["warnings"].append(
+            f"Missing compression modulus: f_modulus={MISSING_MODULUS_SCORE:.2f}, "
+            f"CVS capped at {MISSING_MODULUS_CVS_CAP:.0f}"
+        )
 
     result["f_cof"] = round(f_cof_val, 4)
     result["f_wear"] = round(f_wear_val, 4)
@@ -316,6 +355,8 @@ def compute_cvs(
 
     # ---- CVS ----
     cvs = i * (p / 100.0) * s * 100.0
+    if missing_modulus:
+        cvs = min(cvs, MISSING_MODULUS_CVS_CAP)
     result["cvs"] = round(cvs, 2)
 
     # ---- Grade ----

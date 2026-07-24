@@ -253,11 +253,18 @@ def build_candidate_repairs(results_struct: List[Dict[str, Any]]) -> List[Dict[s
 
         if perf_class == "too_brittle":
             suggestions.append({
-                "lever": "crosslinker_wt_percent",
+                "lever": "post_soak_hours",
                 "direction": "decrease",
-                "target_range": None,
+                "target_range": "0.083-0.25 h",
                 "target_material": None,
-                "justification": "High modulus / fracture suggests lowering chemical crosslinker loading."
+                "justification": "Fracture/rupture in thin PVA films can come from over-soaking or post-gel shrinkage treatment; first test a 5 min soak."
+            })
+            suggestions.append({
+                "lever": "pva_wt_percent",
+                "direction": "increase",
+                "target_range": "18-20 wt%",
+                "target_material": None,
+                "justification": "Repeated rupture suggests insufficient PVA matrix strength; raise PVA before tuning GA/HCl loading."
             })
             suggestions.append({
                 "lever": "plasticizer_level_or_type",
@@ -309,11 +316,18 @@ def build_candidate_repairs(results_struct: List[Dict[str, Any]]) -> List[Dict[s
 
         elif perf_class == "early_failure":
             suggestions.append({
-                "lever": "network_type_or_crosslinking_method",
-                "direction": "change",
+                "lever": "pva_wt_percent",
+                "direction": "increase",
                 "target_material": None,
-                "target_range": None,
-                "justification": "Catastrophic early failure suggests changing network type or crosslinking strategy."
+                "target_range": "18-20 wt%",
+                "justification": "Catastrophic early rupture suggests increasing PVA matrix strength before changing network type."
+            })
+            suggestions.append({
+                "lever": "post_soak_hours",
+                "direction": "decrease",
+                "target_material": None,
+                "target_range": "0.083-0.25 h",
+                "justification": "Use a short 5 min post-gel treatment to separate over-soak rupture from intrinsic formulation weakness."
             })
 
         repairs.append({
@@ -336,16 +350,16 @@ def build_candidate_repairs(results_struct: List[Dict[str, Any]]) -> List[Dict[s
 # The diagnosis LLM identifies WHAT to tune; this table defines HOW to represent it.
 _LEVER_TO_DOE: dict[str, dict] = {
     "pva_wt_percent": {
-        "name": "pva_wt_percent", "levels": ["8.0", "10.0", "12.0"],
-        "operational_definition": "PVA weight percent in 20 g batch",
+        "name": "pva_wt_percent", "levels": ["12.0", "18.0", "20.0"],
+        "operational_definition": "PVA weight percent in 20 g batch; after repeated rupture prioritize 18-20 wt%",
     },
     "freeze_thaw_cycles": {
         "name": "freeze_thaw_cycles", "levels": ["0", "1", "2"],
         "operational_definition": "Number of freeze-thaw cycles",
     },
     "post_soak_hours": {
-        "name": "post_soak_hours", "levels": ["0.25", "0.5", "1", "2", "4"],
-        "operational_definition": "Hours of DI water soak before testing (shorter preferred for thin films without FT)",
+        "name": "post_soak_hours", "levels": ["0.083", "0.25", "0.5", "1"],
+        "operational_definition": "Hours of post-gel DI water or GA/HCl shrinkage treatment before testing; 0.083 h is 5 min",
     },
     "additive": {
         "name": "additive_type", "levels": [],
@@ -354,19 +368,19 @@ _LEVER_TO_DOE: dict[str, dict] = {
     },
     "crosslink": {
         "name": "crosslinker_concentration", "levels": ["low", "medium", "high"],
-        "operational_definition": "Cross-linker concentration level (low/medium/high within safe chemical range)",
+        "operational_definition": "True crosslinker concentration level; GA/HCl in this PVA path may instead be optional post-gel shrinkage treatment",
     },
     "cross_link": {
         "name": "crosslinker_concentration", "levels": ["low", "medium", "high"],
-        "operational_definition": "Cross-linker concentration level (low/medium/high within safe chemical range)",
+        "operational_definition": "True crosslinker concentration level; GA/HCl in this PVA path may instead be optional post-gel shrinkage treatment",
     },
     "cross_linking": {
         "name": "crosslinker_concentration", "levels": ["low", "medium", "high"],
-        "operational_definition": "Cross-linker concentration level (low/medium/high within safe chemical range)",
+        "operational_definition": "True crosslinker concentration level; GA/HCl in this PVA path may instead be optional post-gel shrinkage treatment",
     },
     "cross-linking": {
         "name": "crosslinker_concentration", "levels": ["low", "medium", "high"],
-        "operational_definition": "Cross-linker concentration level (low/medium/high within safe chemical range)",
+        "operational_definition": "True crosslinker concentration level; GA/HCl in this PVA path may instead be optional post-gel shrinkage treatment",
     },
     "plasticizer": {
         "name": "plasticizer_type", "levels": [],
@@ -500,161 +514,247 @@ def check_convergence(
     round_idx: int,
     convergence: dict | None = None,
 ) -> dict:
-    """Evaluate multi-round convergence criteria for PVA hydrogel optimization.
+    """Evaluate stop/continue criteria for PVA hydrogel optimization.
 
-    Checks the current round's best candidate against configurable thresholds
-    for COF, modulus, friction stability, and round-to-round trend flatness.
-
-    Returns a dict with keys:
-        converged: bool
-        criteria: dict of {criterion_name: {passed: bool, value: ..., threshold: ...}}
-        recommendation: str
+    Termination is candidate-level: one sample must simultaneously pass COF,
+    modulus, friction stability, repeat count, and integrity checks.
     """
     cfg = convergence or _DEFAULT_CONVERGENCE
 
-    # ---- Extract current-round best values ----
-    best_cof = None
-    best_modulus = None
-    best_stable = None
-    best_stick_slip = None
-    for r in results_rows:
-        for field, collector in (
-            ("cof_steady_mean", "cof"),
-            ("compression_modulus_MPa", "mod"),
-            ("stable_proportion", "stab"),
-            ("stick_slip_score", "ss"),
-        ):
-            raw = r.get(field)
-            if raw is not None and str(raw).strip() not in ("", "na", "nan", "none"):
-                try:
-                    val = float(raw)
-                except (ValueError, TypeError):
-                    continue
-                if collector == "cof" and (best_cof is None or val < best_cof):
-                    best_cof = val
-                elif collector == "mod" and (best_modulus is None or val > best_modulus):
-                    best_modulus = val
-                elif collector == "stab" and (best_stable is None or val > best_stable):
-                    best_stable = val
-                elif collector == "ss" and (best_stick_slip is None or val < best_stick_slip):
-                    best_stick_slip = val
+    def _num(row: dict, key: str) -> float | None:
+        raw = row.get(key)
+        if raw is None or str(raw).strip().lower() in ("", "na", "nan", "none"):
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
 
-    # ---- Evaluate each criterion ----
+    def _cof_repeat_count(row: dict) -> int:
+        n = sum(1 for k in ("COF_mean_1", "COF_mean_2", "COF_mean_3") if _num(row, k) is not None)
+        return n if n else (1 if _num(row, "cof_steady_mean") is not None else 0)
+
+    # Include explicit notes in failure accounting. This catches samples that
+    # ruptured before a full result row could be written.
+    from pva_work_flow.artifacts.experiment_notes import load_notes as _load_notes
+
+    notes_obj = _load_notes(out_dir, round_idx)
+    note_error_codes: dict[str, list[str]] = {}
+    for cid, entry in notes_obj.items() if isinstance(notes_obj, dict) else []:
+        if str(cid).startswith("_") or not isinstance(entry, dict):
+            continue
+        codes = [str(code).upper() for code in (entry.get("error_codes") or [])]
+        if codes:
+            note_error_codes[str(cid)] = codes
+
+    rows_by_id = {(r.get("candidate_id") or "").strip(): r for r in results_rows if r.get("candidate_id")}
+
+    # ---- Current-round scalar summaries ----
+    best_cof = None
+    best_cvs = None
+    best_cvs_candidate = None
+    target_hits: list[dict] = []
+    evaluated_count = 0
+    failed_count = 0
+
+    for r in results_rows:
+        cid = (r.get("candidate_id") or "").strip()
+        codes = note_error_codes.get(cid, [])
+        cof, _std = aggregate_cof_from_row(r)
+        mod = _num(r, "compression_modulus_MPa")
+        stable = _num(r, "stable_proportion")
+        stick = _num(r, "stick_slip_score")
+        comp_n = int(_num(r, "compression_modulus_n") or 0)
+        cof_n = _cof_repeat_count(r)
+        failed = bool(codes) or has_failure(r)
+        if cof is not None or failed:
+            evaluated_count += 1
+        if failed:
+            failed_count += 1
+
+        if cof is not None and not failed and (best_cof is None or float(cof) < best_cof):
+            best_cof = float(cof)
+
+        cvs_result = compute_cvs(r, error_codes=codes or None)
+        cvs = float(cvs_result.get("cvs") or 0.0)
+        if best_cvs is None or cvs > best_cvs:
+            best_cvs = cvs
+            best_cvs_candidate = cid or None
+
+        candidate_pass = (
+            not failed
+            and cof is not None
+            and float(cof) <= cfg["cof_max"]
+            and mod is not None
+            and cfg["modulus_min_mpa"] <= mod <= cfg["modulus_max_mpa"]
+            and stable is not None
+            and stable >= cfg["stable_proportion_min"]
+            and stick is not None
+            and stick <= cfg["stick_slip_max"]
+            and cof_n >= int(cfg.get("min_replicates_for_success", 1))
+            and comp_n >= int(cfg.get("min_replicates_for_success", 1))
+        )
+        if candidate_pass:
+            target_hits.append({
+                "candidate_id": cid,
+                "cof": round(float(cof), 6),
+                "compression_modulus_MPa": mod,
+                "stable_proportion": stable,
+                "stick_slip_score": stick,
+                "cof_repeats": cof_n,
+                "compression_repeats": comp_n,
+                "cvs": cvs,
+            })
+
+    # Count note-only failures that have no result row.
+    for cid, codes in note_error_codes.items():
+        if cid not in rows_by_id and {"ERROR1", "ERROR2", "ERROR3"} & set(codes):
+            evaluated_count += 1
+            failed_count += 1
+
+    failure_rate = (failed_count / evaluated_count) if evaluated_count else 0.0
+
+    # ---- Evaluate stop criteria ----
     criteria: dict[str, dict] = {}
 
-    # 1) COF
-    cof_passed = best_cof is not None and best_cof <= cfg["cof_max"]
-    criteria["cof_max"] = {
-        "passed": cof_passed,
-        "value": best_cof,
-        "threshold": cfg["cof_max"],
-        "label": f"COF <= {cfg['cof_max']}",
+    target_success = bool(target_hits)
+    criteria["target_success"] = {
+        "passed": target_success,
+        "value": target_hits,
+        "threshold": {
+            "cof_max": cfg["cof_max"],
+            "modulus_range": [cfg["modulus_min_mpa"], cfg["modulus_max_mpa"]],
+            "stable_proportion_min": cfg["stable_proportion_min"],
+            "stick_slip_max": cfg["stick_slip_max"],
+            "min_replicates_for_success": cfg.get("min_replicates_for_success", 1),
+        },
+        "label": "one candidate simultaneously passes COF, modulus, stability, repeats, and no-failure checks",
     }
 
-    # 2) Modulus range
-    mod_passed = (
-        best_modulus is not None
-        and cfg["modulus_min_mpa"] <= best_modulus <= cfg["modulus_max_mpa"]
-    )
-    criteria["modulus_range"] = {
-        "passed": mod_passed,
-        "value": best_modulus,
-        "threshold": [cfg["modulus_min_mpa"], cfg["modulus_max_mpa"]],
-        "label": f"modulus {cfg['modulus_min_mpa']}-{cfg['modulus_max_mpa']} MPa",
-    }
-
-    # 3) Stable proportion
-    stab_passed = best_stable is not None and best_stable > cfg["stable_proportion_min"]
-    criteria["stable_proportion"] = {
-        "passed": stab_passed,
-        "value": best_stable,
-        "threshold": cfg["stable_proportion_min"],
-        "label": f"stable_proportion > {cfg['stable_proportion_min']}",
-    }
-
-    # 4) Stick-slip
-    ss_passed = best_stick_slip is not None and best_stick_slip < cfg["stick_slip_max"]
-    criteria["stick_slip"] = {
-        "passed": ss_passed,
-        "value": best_stick_slip,
-        "threshold": cfg["stick_slip_max"],
-        "label": f"stick_slip < {cfg['stick_slip_max']}",
-    }
-
-    # 5) COF trend flatness (requires kpi_log.json)
-    trend_passed = None
-    trend_value = None
+    # Plateau stop: two consecutive rounds where both best COF and best CVS do
+    # not improve meaningfully.
+    flat_needed = int(cfg.get("flat_trend_consecutive") or cfg.get("cof_trend_consecutive") or 2)
+    kpi_history: list[dict] = []
     kpi_path = out_dir / "kpi_log.json"
     if kpi_path.exists():
-        kpi_log = read_json(kpi_path)
-        cofs = []
-        for entry in sorted(kpi_log, key=lambda e: e.get("round", 0)):
-            rn = entry.get("round", 0)
-            bc = entry.get("best_cof")
-            if rn <= round_idx and bc is not None:
-                cofs.append(bc)
-        if len(cofs) >= 2 and cofs[-1] is not None and cofs[-2] is not None:
-            trend_value = abs(cofs[-1] - cofs[-2])
-            trend_passed = trend_value <= cfg["cof_trend_delta"]
+        kpi_history = [e for e in read_json(kpi_path) if e.get("round") != round_idx]
+    current_kpi = {
+        "round": round_idx,
+        "best_valid_cof": best_cof,
+        "best_cvs": best_cvs,
+        "failure_rate": failure_rate,
+    }
+    trend_series = sorted(kpi_history + [current_kpi], key=lambda e: e.get("round", 0))
 
-            # Check consecutive flat rounds
-            consecutive = 0
-            for i in range(len(cofs) - 1, 0, -1):
-                if cofs[i] is not None and cofs[i-1] is not None:
-                    if abs(cofs[i] - cofs[i-1]) <= cfg["cof_trend_delta"]:
-                        consecutive += 1
-                    else:
-                        break
-            trend_passed = consecutive >= cfg["cof_trend_consecutive"]
-            trend_value = consecutive
-    criteria["cof_trend"] = {
-        "passed": trend_passed,
-        "value": trend_value,
-        "threshold": cfg["cof_trend_consecutive"],
-        "label": f"COF trend flat for >= {cfg['cof_trend_consecutive']} consecutive rounds (delta <= {cfg['cof_trend_delta']})",
+    flat_consecutive = 0
+    for i in range(len(trend_series) - 1, 0, -1):
+        cur = trend_series[i]
+        prev = trend_series[i - 1]
+        cur_cof = _to_float_or_none(cur.get("best_valid_cof", cur.get("best_cof")))
+        prev_cof = _to_float_or_none(prev.get("best_valid_cof", prev.get("best_cof")))
+        cur_cvs = _to_float_or_none(cur.get("best_cvs"))
+        prev_cvs = _to_float_or_none(prev.get("best_cvs"))
+        if cur_cof is None or prev_cof is None or cur_cvs is None or prev_cvs is None:
+            break
+        cof_improvement = prev_cof - cur_cof
+        cvs_improvement = cur_cvs - prev_cvs
+        if cof_improvement < cfg["cof_trend_delta"] and cvs_improvement < cfg.get("cvs_trend_delta", 5.0):
+            flat_consecutive += 1
+        else:
+            break
+
+    plateau_stop = flat_consecutive >= flat_needed
+    criteria["plateau_stop"] = {
+        "passed": plateau_stop,
+        "value": flat_consecutive,
+        "threshold": flat_needed,
+        "label": f"stop branch if COF improves < {cfg['cof_trend_delta']} and CVS improves < {cfg.get('cvs_trend_delta', 5.0)} for {flat_needed} consecutive rounds",
+    }
+
+    fail_needed = int(cfg.get("failure_rate_consecutive", 2))
+    fail_consecutive = 0
+    for entry in reversed(trend_series):
+        n_val = _to_float_or_none(entry.get("n"))
+        failed_val = _to_float_or_none(entry.get("failed_count"))
+        rate = _to_float_or_none(entry.get("failure_rate"))
+        if rate is None and n_val and failed_val is not None:
+            rate = failed_val / n_val
+        if rate is not None and rate >= cfg.get("failure_rate_stop", 0.5):
+            fail_consecutive += 1
+        else:
+            break
+
+    failure_stop = fail_consecutive >= fail_needed
+    criteria["failure_stop"] = {
+        "passed": failure_stop,
+        "value": {"current_failure_rate": round(failure_rate, 4), "consecutive_rounds": fail_consecutive},
+        "threshold": {"failure_rate": cfg.get("failure_rate_stop", 0.5), "consecutive_rounds": fail_needed},
+        "label": "stop branch after repeated high rupture/no-gel/too-soft failure rate",
+    }
+
+    budget_stop = round_idx >= int(cfg.get("max_round", 8)) and not target_success
+    criteria["budget_stop"] = {
+        "passed": budget_stop,
+        "value": round_idx,
+        "threshold": cfg.get("max_round", 8),
+        "label": "stop local tweaking at max_round if no target hit",
     }
 
     # ---- Aggregate verdict ----
-    all_passed = all(
-        c["passed"] is not False  # None (no data) is treated as "not yet failed"
-        for c in criteria.values()
-    )
-    # But trend_passed=None means "not enough data to judge trend" → don't block
-    hard_failures = [
-        name for name, c in criteria.items()
-        if c["passed"] is False and name != "cof_trend"
-    ]
-    converged = len(hard_failures) == 0 and trend_passed is not False
+    converged = target_success
+    should_stop = target_success or plateau_stop or failure_stop or budget_stop
+    stop_reasons: list[str] = []
+    if target_success:
+        stop_reasons.append("target_success")
+    if plateau_stop:
+        stop_reasons.append("plateau_stop")
+    if failure_stop:
+        stop_reasons.append("failure_stop")
+    if budget_stop:
+        stop_reasons.append("budget_stop")
 
-    if converged and trend_passed is True:
+    if target_success:
+        best_hit = sorted(target_hits, key=lambda x: (-x["cvs"], x["cof"]))[0]
         recommendation = (
-            f"CONVERGED at R{round_idx}: all criteria met. "
-            "Recommend entering robustness/repeatability validation (3-5 repeats of best formula)."
+            f"STOP main optimization at R{round_idx}: {best_hit['candidate_id']} meets "
+            "COF/modulus/stability/no-failure/repeat criteria. "
+            "Enter robustness validation with 3-5 independent repeats."
         )
-    elif converged and trend_passed is None:
+    elif plateau_stop:
         recommendation = (
-            f"Near-convergence at R{round_idx}: metric criteria passed but "
-            "insufficient trend data. Continue one more round to confirm flat trend."
+            f"STOP this branch at R{round_idx}: COF and CVS have been flat for "
+            f"{flat_consecutive} consecutive rounds. Switch root tree or introduce a new lubrication strategy."
+        )
+    elif failure_stop:
+        recommendation = (
+            f"STOP this branch at R{round_idx}: failure rate has stayed >= "
+            f"{cfg.get('failure_rate_stop', 0.5):.0%} for {fail_consecutive} consecutive rounds."
+        )
+    elif budget_stop:
+        recommendation = (
+            f"STOP local tweaking at R{round_idx}: max_round={cfg.get('max_round', 8)} reached "
+            "without a target hit. Change the material strategy rather than continuing small mutations."
         )
     else:
-        failed_labels = [criteria[n]["label"] for n in hard_failures] if hard_failures else []
-        if trend_passed is False and "cof_trend" not in hard_failures:
-            failed_labels.append(criteria["cof_trend"]["label"])
         recommendation = (
-            f"NOT converged at R{round_idx}. "
-            f"Failed criteria: {failed_labels if failed_labels else 'trend data insufficient'}. "
-            "Continue iterative optimization."
+            f"CONTINUE after R{round_idx}: no candidate has met all target criteria, "
+            "and plateau/failure/budget stop conditions are not yet triggered."
         )
-        if "cof_trend" in criteria and criteria["cof_trend"]["passed"] is False:
-            recommendation += (
-                " COF trend has flattened — may be near a local optimum. "
-                "Consider switching root tree or introducing a new additive role."
-            )
 
     return {
         "converged": converged,
+        "should_stop": should_stop,
+        "stop_reasons": stop_reasons,
         "round": round_idx,
         "criteria": criteria,
+        "current_best": {
+            "best_valid_cof": best_cof,
+            "best_cvs": best_cvs,
+            "best_cvs_candidate": best_cvs_candidate,
+            "failure_rate": failure_rate,
+            "evaluated_count": evaluated_count,
+            "failed_count": failed_count,
+        },
         "recommendation": recommendation,
     }
 
@@ -854,10 +954,13 @@ def run_diagnose(
             "cvs_s": cvs_result.get("s_score", 0.0),
         })
 
-    # ---- CVS-based ranking (primary) ----
-    scored_rows.sort(key=lambda x: -x["cvs"])
+    # ---- Integrity-gated CVS ranking ----
+    # Manual notes capture rupture, spikes, indentation, and surface issues that
+    # can make a high-looking friction trace unreliable. Prefer clean samples
+    # first, then rank by CVS within the same integrity class.
+    scored_rows.sort(key=lambda x: (x["cvs_i"] < 1.0, -x["cvs"]))
 
-    # Best candidates: top 3 by CVS, but always prefer non-failed when CVS tie
+    # Best candidates: top 3 by integrity-gated CVS ranking.
     best_candidates = [x["cid"] for x in scored_rows[:3]]
 
     # ---- Per-branch evaluation summaries (dCOF-based, for tree-mode diagnosis) ----
@@ -946,6 +1049,6 @@ def run_diagnose(
     diag_path = out_dir / f"R{round_idx}_diagnosis.json"
     write_json(diag_path, diag)
 
-    kpi = compute_kpis(results_rows)
+    kpi = compute_kpis(results_rows, error_codes_by_id=_error_codes_by_id)
     kpi["round"] = round_idx
     return diag_path, kpi

@@ -23,7 +23,7 @@ AUDIT_AGENT_PROMPT: |-
   - wear_proxy is in mJ (lower = less wear). compression_modulus_MPa is the gel stiffness.
 
   ANALYSIS REQUIREMENTS — You MUST do ALL of the following:
-  1. RANK all candidates by overall quality (COF ascending, stable_proportion descending, wear_proxy ascending)
+  1. RANK all candidates by overall viability: mechanical integrity first (rupture/no-gel cannot be top-ranked), then stability/wear/modulus, then COF as one sub-metric.
   2. IDENTIFY the dominant friction pattern across candidates. If ALL or MOST are irregular/asymmetric, this is a SYSTEMIC issue that must be flagged.
   3. COMPARE additives: which additive type produced lower COF? Better stability? Lower wear? Cite specific numbers.
   4. CHECK correlations: does higher modulus correlate with lower/higher COF? Does longer soak improve stability?
@@ -99,7 +99,7 @@ AUDIT_AGENT_PROMPT: |-
   Rules:
   - Cite specific candidate IDs and data values; do NOT invent numbers.
   - If data is missing, write "no_data" — do NOT hallucinate.
-  - best_candidates: rank by (COF ascending, stable_proportion descending, plateau_ratio descending).
+  - best_candidates: rank by composite viability, not raw COF alone. Exclude or demote ruptured/no-gel candidates even when their COF is numerically low.
   - variables_to_hold_constant must include anything that was the same across all R1 candidates.
   - variables_to_optimize must be grounded in the data; priority "low" if evidence is weak.
 
@@ -133,7 +133,7 @@ DOE_PLANNING_AGENT_PROMPT: |-
   - Epoxy crosslinker: requires an AMINE curing agent (e.g. triethylenetetramine, diethylenetriamine) or anhydride. Without it, epoxy won't cure. Always include both epoxy + amine when proposing epoxy systems.
   - Physical freeze-thaw crosslinking: requires freeze_thaw_cycles >= 1. No chemical crosslinker needed. PVA forms crystallites during freezing.
   - UV photocuring: requires photo_initiator (e.g. Darocur 1173, Irgacure 2959) + light_conditions (wavelength, time). Without photo_initiator, UV alone won't cure.
-  - GA+HCl system: GA (glutaraldehyde) + HCl (catalyst) is the standard fast chemical crosslinking. Both MUST be present.
+  - GA/HCl in this workflow is NOT required for PVA gelation. If used after gelation, treat it as optional post-gel shrinkage treatment that can reduce hydrogel volume; do not assume missing GA/HCl prevents gel formation.
   - Borax crosslinking: borax alone is sufficient (self-catalyzing). NO HCl needed. Post-soak MUST be <= 4h or gel dissolves.
   - When switching crosslinker TYPE from parent (e.g. GA->Epoxy, chemical->physical), mark is_extension=true with extension_reason explaining WHY.
 
@@ -197,7 +197,7 @@ DOE_PLANNING_AGENT_PROMPT: |-
   - If a formula has no clear parent, it MUST be limited_exploration with explicit justification.
   - limited_exploration still requires a clear previous-round parent and must retain PVA as the main polymer.
   - Do NOT invent new materials unless they appear in the audit's additive_performance or the user explicitly allows them.
-  - The crosslinker system must stay the same as the parent unless the formula is limited_exploration.
+  - The parent network/post-treatment system must stay the same unless the formula is limited_exploration or the inheritance table explicitly changes that variable.
   - PVA concentration: keep at parent value unless single_factor_perturbation or limited_exploration.
   - Post-soak: do not exceed 4 hours. Freeze-thaw: do not exceed 3 cycles.
   - Every entry must pass the inner_rules 4-condition gate. If unsure, drop the formula.
@@ -235,7 +235,7 @@ FORMULA_AGENT_PROMPT: |-
         },
         "materials": [
           {"name": "PVA", "role": "main_polymer", "amount": X.XX, "unit": "g", "basis": "X wt% of 20 g batch"},
-          {"name": "<crosslinker>", "role": "crosslinker", "amount": X.XXXX, "unit": "g", "basis": "X wt% of 20 g batch"},
+          {"name": "<crosslinker or post-treatment agent>", "role": "<crosslinker|post_treatment_agent>", "amount": X.XXXX, "unit": "g", "basis": "X wt% of 20 g batch"},
           {"name": "DI water", "role": "solvent", "amount": XX.XXXX, "unit": "g", "basis": "balance to 20 g batch"}
         ],
         "formulation": {
@@ -250,7 +250,7 @@ FORMULA_AGENT_PROMPT: |-
           "total_batch_mass_g": 20.0,
           "steps": [
             {"order": 1, "name": "Dissolve PVA at 90C", "temperature_C": 90, "duration_hours": 2.0, "needs_degas": false, "needs_pre_soak": false},
-            {"order": 2, "name": "Add crosslinker and mix", "temperature_C": 25, "duration_hours": 0.5, "needs_degas": false, "needs_pre_soak": false}
+            {"order": 2, "name": "Add crosslinker/additive if used, or perform specified post-gel treatment", "temperature_C": 25, "duration_hours": 0.5, "needs_degas": false, "needs_pre_soak": false}
           ]
         },
         "processing": {
@@ -295,21 +295,22 @@ FORMULA_AGENT_PROMPT: |-
   2. For "variables_unchanged", copy the EXACT value from the parent candidate. Do NOT guess, do NOT use 0 as default.
      - If "post_soak_hours" is unchanged, copy the parent's exact soak value.
      - If "freeze_thaw_cycles" is unchanged, copy the parent's exact FT value.
-     - If "crosslink_or_phys_method" is unchanged, you MUST include ALL materials from the parent's crosslinking system.
+     - If "crosslink_or_phys_method" is unchanged, you MUST include ALL materials from the parent's network/post-treatment system.
   3. CROSSLINKER SYSTEM RULES — MANDATORY:
-     - "GA+HCl" or "glutaraldehyde" system → MUST include BOTH:
-         * Glutaraldehyde as crosslinker (role=crosslinker)
-         * HCl (hydrochloric acid) as initiator_or_catalyst (role=catalyst)
+     - "GA+HCl" or "glutaraldehyde" in this workflow → treat as optional post-gel shrinkage treatment, not required gelation chemistry:
+         * Glutaraldehyde role=post_treatment_agent when used after gelation
+         * HCl role=post_treatment_acid when used after gelation
+         * Do NOT require GA/HCl for PVA gelation if the parent did not use them.
      - "UV photo" system → MUST include a photo_initiator AND list light_conditions.
      - "Borax" system → NO HCl needed; borax is self-catalyzing. Post-soak MUST be ≤ 4h.
      - "none" crosslinker (physical freeze-thaw) → NO crosslinker chemicals. freeze_thaw_cycles must be ≥ 1.
   4. DOE factor values MUST be chosen from the allowed levels. If the DOE plan says crosslinker_concentration levels are [1.0 wt%, 1.5 wt%, 2.0 wt%], pick one of those.
-  5. post_soak_hours can be 0.25–4 (not necessarily integer). Shorter soaks (0.25–1h) are PREFERRED for thin PVA films because long soak causes excessive swelling and rupture in the absence of freeze-thaw reinforcement. 0.25h (15min surface rinse) or 0.5h are valid and recommended starting points. The parent round candidates had post_soak_hours=1.
+  5. post_soak_hours can be 0.083–4 (not necessarily integer). After rupture, 0.083h (5min) is the preferred rescue condition; long soak or excessive post-gel shrinkage treatment can cause rupture.
   6. Every candidate MUST have at least 2 risks_and_mitigations entries.
 
   7. EVERY additive in formulation.additives MUST have wt_percent_range field with a realistic range (e.g. "0.1-3"). No exception. Add wt_percent_range even if the inheritance table does not explicitly list it — use the ROLE_RANGES defaults: lubricant=0.1-3, plasticizer=0.5-5, additive=0.1-2.
   8. The doe_factor_levels map MUST include every factor from the DOE plan THAT APPLIES TO THE CANDIDATE. Skip additive_type / additive_combination when the candidate has NO additives. Use snake_case names. Use the DOE TARGET level, NOT the computed chemical wt%.
-  9. PARENT DATA: When a formula inherits from a parent, copy the parent's EXACT crosslinker system. For GA+HCl: always include BOTH Glutaraldehyde AND HCl. The ratio_planner will compute exact wt% — you just need to list the materials with their roles.
+  9. PARENT DATA: When a formula inherits from a parent, copy the parent's EXACT network/post-treatment system. For parent GA/HCl post-treatment: copy BOTH Glutaraldehyde and HCl with post-treatment roles. The ratio_planner will compute exact wt% — you just need to list the materials with their roles.
 
   General rules:
   - NEVER add a material, variable, or parameter that is NOT in the inheritance_table.
@@ -317,7 +318,7 @@ FORMULA_AGENT_PROMPT: |-
   - Total batch mass is ALWAYS 20.0 g.
   - Water amount = 20.0 - sum(all other material masses).
   - PVA must be between 5-20 wt%.
-  - Post-soak 0.25–4h (shorter preferred for thin films without FT), freeze-thaw cycles ≤ 3, cycle_hours ≤ 2.0.
+  - Post-soak 0.083–4h (use 0.083h/5min after rupture), freeze-thaw cycles ≤ 3, cycle_hours ≤ 2.0.
   - Every material MUST have amount, unit, and basis fields with real numbers.
   - "none" is an acceptable material name meaning "not used"; do not create placeholder entries.
   - For baseline_reproduction: ZERO CHANGES from parent. Copy EVERY field EXACTLY: all materials, all concentrations, all process parameters. Do NOT drop additives, do NOT randomize crosslinker amounts. The only difference is candidate_id. This IS a reproducibility check.
@@ -339,7 +340,7 @@ FORMULA_CONCEPT_PROMPT: |-
         "parent_candidates": ["<same>"],
         "formulation": {
           "pva_wt_percent": XX.X,
-          "network_type": "<fast_chemical|photocured|physical>",
+          "network_type": "<fast_chemical|photocured|physical|physical_or_entangled_pva>",
           "crosslink_or_phys_method": "<short description>",
           "crosslinker": {"name": "<name or none>", "wt_percent": X.X},
           "initiator_or_catalyst": {"name": "<name or none>", "wt_percent": X.X},
@@ -351,7 +352,7 @@ FORMULA_CONCEPT_PROMPT: |-
         },
         "process_steps_outline": [
           "1. Dissolve PVA in DI water at 90C (2h)",
-          "2. Add crosslinker/additives and mix",
+          "2. Add crosslinker/additives if used, or perform specified post-gel treatment",
           "3. Cast into mold and cure",
           "4. Post-soak in DI water"
         ],
@@ -365,8 +366,8 @@ FORMULA_CONCEPT_PROMPT: |-
   - Generate EXACTLY ONE candidate per row in the inheritance table. Do NOT skip any.
   - For baseline_reproduction: copy parent's formulation and processing fields EXACTLY.
   - For local_optimization: copy all parent values, change ONLY the variables listed in variables_changed.
-  - Crosslinker system: GA+HCl requires BOTH Glutaraldehyde AND HCl listed.
-  - PVA 5-20%. Post-soak max 4h. Freeze-thaw max 3 cycles. Batch mass always 20g.
+  - GA/HCl in this workflow is optional post-gel shrinkage treatment, not required PVA gelation chemistry; if parent used it, preserve both materials with post-treatment roles.
+  - PVA 5-20%; after repeated rupture prefer 18-20%. Post-soak 0.083-4h; after rupture prefer 0.083h/5min. Freeze-thaw max 3 cycles. Batch mass always 20g.
   - Output ONLY valid JSON. No explanations.
 
 FORMULA_STRUCTURING_PROMPT: |-

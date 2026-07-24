@@ -186,6 +186,12 @@ def collect_formulation_documents(db_path: Path | None) -> list[dict[str, Any]]:
             LEFT JOIN papers p ON p.paper_id = fc.paper_id
             """
         ).fetchall()
+        project_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_experiment_records'"
+        ).fetchone()
+        project_rows = conn.execute(
+            "SELECT * FROM project_experiment_records WHERE evidence_type='measured_fact'"
+        ).fetchall() if project_exists else []
     finally:
         conn.close()
 
@@ -221,6 +227,24 @@ def collect_formulation_documents(db_path: Path | None) -> list[dict[str, Any]]:
                     "property_targets": rec.get("property_targets"),
                     "tradeoff_or_risk": rec.get("tradeoff_or_risk"),
                     "source_locator": rec.get("source_locator"),
+                },
+            }
+        )
+    for row in project_rows:
+        rec = dict(row)
+        docs.append(
+            {
+                "doc_id": f"project_experiment:{rec.get('record_id')}",
+                "source_type": "project_experiment",
+                "text": _compact_text(str(rec.get("searchable_text") or "")),
+                "metadata": {
+                    "record_id": rec.get("record_id"),
+                    "study_id": rec.get("study_id"),
+                    "root_id": rec.get("root_id"),
+                    "round_idx": rec.get("round_idx"),
+                    "candidate_id": rec.get("candidate_id"),
+                    "outcome_status": rec.get("outcome_status"),
+                    "cvs": rec.get("cvs"),
                 },
             }
         )
@@ -329,9 +353,22 @@ def query_vector_index(
 def ensure_project_vector_index(out_dir: Path, formulation_db: Path | None = None) -> dict[str, Any]:
     index = load_vector_index(out_dir)
     expected_has_formulation = bool(formulation_db and formulation_db.exists())
+    expected_has_project_experiments = False
+    if expected_has_formulation and formulation_db is not None:
+        conn = sqlite3.connect(formulation_db)
+        try:
+            expected_has_project_experiments = bool(
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_experiment_records'"
+                ).fetchone()
+            )
+        finally:
+            conn.close()
     if index:
         source_types = {str(d.get("source_type") or "") for d in index.get("documents") or []}
-        if not expected_has_formulation or "formulation_case" in source_types:
+        has_required_formulation = not expected_has_formulation or "formulation_case" in source_types
+        has_required_project = not expected_has_project_experiments or "project_experiment" in source_types
+        if has_required_formulation and has_required_project:
             return index
     return build_project_vector_index(out_dir, formulation_db=formulation_db)
 

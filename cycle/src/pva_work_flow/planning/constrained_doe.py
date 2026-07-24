@@ -6,6 +6,7 @@ lineage skeleton, while the LLM only explains and completes it.
 
 from __future__ import annotations
 
+import csv
 from copy import deepcopy
 import os
 from pathlib import Path
@@ -21,12 +22,13 @@ DEFAULT_NUMERIC_DECREASE_FACTOR = 0.5
 DEFAULT_NUMERIC_INCREASE_FACTOR = 2.0
 DEFAULT_FREEZE_THAW_STEP = 2
 DEFAULT_POST_SOAK_RESCUE_FACTOR = 0.5
+FIVE_MIN_SOAK_HOURS = round(5.0 / 60.0, 4)
 BINARY_SEARCH_BOUNDS = {
     "pva_wt_percent": (5.0, 20.0),
     "primary_additive_wt_percent": (0.05, 1.5),
     "crosslinker_wt_percent": (0.05, 1.5),
     "initiator_or_catalyst_wt_percent": (0.02, 0.5),
-    "post_soak_hours": (0.25, 4.0),
+    "post_soak_hours": (FIVE_MIN_SOAK_HOURS, 4.0),
     "freeze_thaw_cycles": (0.0, 5.0),
 }
 
@@ -177,21 +179,143 @@ def _opposite_direction(direction: str) -> str:
 
 
 def _post_soak_rescue_value(parent_value: Any, suspected_value: Any) -> float | None:
-    """Shorten parent post-soak when a longer soak is suspected to cause rupture."""
+    """Shorten parent post-soak when soaking is suspected to cause rupture."""
     try:
         parent = float(parent_value)
         suspected = float(suspected_value)
     except (TypeError, ValueError):
         return None
     low, _high = BINARY_SEARCH_BOUNDS["post_soak_hours"]
-    if parent <= low or suspected <= parent:
+    if parent <= low:
         return None
     factor = _env_float("PVA_POST_SOAK_RESCUE_FACTOR", DEFAULT_POST_SOAK_RESCUE_FACTOR)
     factor = min(max(factor, 0.1), 0.9)
-    rescue = max(low, round(parent * factor, 4))
+    target = _env_float("PVA_POST_SOAK_RESCUE_HOURS", FIVE_MIN_SOAK_HOURS)
+    rescue = max(low, round(min(parent * factor, target), 4))
     if _numeric_equivalent(parent, rescue):
         return None
     return rescue
+
+
+def _pva_rupture_rescue_value(parent_value: Any) -> float | None:
+    """Raise low-PVA rupturing gels into the 18-20 wt% rescue window."""
+    try:
+        parent = float(parent_value)
+    except (TypeError, ValueError):
+        return None
+    low, high = BINARY_SEARCH_BOUNDS["pva_wt_percent"]
+    if parent >= high:
+        return None
+    target = 18.0 if parent < 18.0 else 20.0
+    target = max(low, min(high, target))
+    if _numeric_equivalent(parent, target):
+        return None
+    return target
+
+
+def _is_rupture_mode(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return text in {"rupture", "break", "broken", "failed", "failure", "error1"} or "rupture" in text
+
+
+def _round_has_all_rupture(out_dir: Path, round_idx: int) -> bool:
+    results_path = out_dir / f"R{round_idx}_results_filled.csv"
+    if not results_path.exists():
+        alt_path = out_dir / "run_state_files" / f"R{round_idx}_results_filled.csv"
+        if alt_path.exists():
+            results_path = alt_path
+    rows: list[dict[str, Any]] = []
+    if results_path.exists():
+        try:
+            with open(results_path, encoding="utf-8-sig", newline="") as fh:
+                rows = [row for row in csv.DictReader(fh) if (row.get("candidate_id") or "").strip()]
+        except Exception:
+            rows = []
+    if not rows:
+        return False
+
+    notes = load_notes(out_dir, round_idx) or {}
+    rupture_count = 0
+    for row in rows:
+        cid = (row.get("candidate_id") or "").strip()
+        failure_type = row.get("failure_type") or row.get("failure_mode") or row.get("status")
+        note_entry = notes.get(cid) if isinstance(notes, dict) else None
+        note_codes = []
+        if isinstance(note_entry, dict):
+            note_codes = [str(code).lower() for code in note_entry.get("error_codes", []) or []]
+        if _is_rupture_mode(failure_type) or "error1" in note_codes:
+            rupture_count += 1
+    return rupture_count == len(rows)
+
+
+def _global_rupture_rescue_entries(
+    round_idx: int,
+    parent: Dict[str, Any],
+    max_count: int,
+) -> List[Dict[str, Any]]:
+    entries: list[Dict[str, Any]] = []
+    if max_count <= 0:
+        return entries
+
+    old_soak = _value_for_variable(parent, "post_soak_hours")
+    new_soak = _post_soak_rescue_value(old_soak, old_soak)
+
+    def _pva_rescue_changes(new_pva: float) -> list[dict[str, Any]]:
+        changes = [_changed("pva_wt_percent", old_pva, new_pva, "raise_pva_after_all_rupture")]
+        if old_soak not in (None, "") and new_soak is not None:
+            changes.append(_changed("post_soak_hours", old_soak, new_soak, "five_min_soak_rescue_after_rupture"))
+        return changes
+
+    old_pva = _value_for_variable(parent, "pva_wt_percent")
+    new_pva = _pva_rupture_rescue_value(old_pva)
+    if old_pva not in (None, "") and new_pva is not None:
+        entries.append(
+            _entry(
+                f"R{round_idx}-{len(entries) + 1:02d}",
+                "failure_rescue_verification",
+                parent,
+                _pva_rescue_changes(new_pva),
+                "All candidates in the source round ruptured; raise PVA into the 18-20 wt% rescue window and use 5 min post-gel treatment.",
+                "If the higher-PVA/5 min candidate survives, treat insufficient matrix strength and over-soaking as coupled rupture drivers.",
+            )
+        )
+
+        stronger_pva = 20.0 if new_pva < 20.0 else None
+        if stronger_pva is not None and len(entries) < max_count:
+            entries.append(
+                _entry(
+                    f"R{round_idx}-{len(entries) + 1:02d}",
+                    "failure_rescue_verification",
+                    parent,
+                    [
+                        (
+                            _changed("pva_wt_percent", old_pva, stronger_pva, "raise_pva_stronger_after_all_rupture")
+                            if change.get("variable") == "pva_wt_percent"
+                            else change
+                        )
+                        for change in _pva_rescue_changes(stronger_pva)
+                    ],
+                    "All candidates in the source round ruptured; test the upper PVA rescue level (20 wt%) with 5 min post-gel treatment.",
+                    "If 20 wt%/5 min survives better than 18 wt%/5 min, treat matrix strength as the dominant rupture limit.",
+                )
+            )
+
+    if len(entries) >= max_count:
+        return entries
+
+    if old_soak not in (None, "") and new_soak is not None:
+        entry = _entry(
+            f"R{round_idx}-{len(entries) + 1:02d}",
+            "failure_rescue_verification",
+            parent,
+            [_changed("post_soak_hours", old_soak, new_soak, "five_min_soak_rescue_after_rupture")],
+            "All candidates in the source round ruptured; shorten the post-gel treatment to 5 min while keeping chemistry fixed.",
+            "If the 5 min candidate survives, treat over-soaking/shrinkage treatment time as a rupture driver.",
+        )
+        if not _entry_is_duplicate(entry, entries):
+            entries.append(entry)
+
+    return entries[:max_count]
 
 
 def _changed(variable: str, old_value: Any, new_value: Any, reason_code: str) -> Dict[str, Any]:
@@ -287,6 +411,38 @@ def _verification_entries_from_memory(
             continue
         if _numeric_equivalent(old_value, new_value):
             continue
+        failure_mode = str(factor.get("failure_mode") or "").lower()
+        if variable == "post_soak_hours" and _is_rupture_mode(failure_mode):
+            rescue_value = _post_soak_rescue_value(old_value, new_value)
+            if rescue_value is None:
+                continue
+            rescue_entry = _entry(
+                f"R{round_idx}-{len(entries) + 1:02d}",
+                "failure_rescue_verification",
+                parent,
+                [_changed(variable, old_value, rescue_value, "five_min_soak_rescue_after_rupture")],
+                (
+                    f"Rescue-check suspected soak-related rupture {factor.get('factor_id')}: "
+                    "use a 5 min post-gel treatment while keeping all chemistry fixed. "
+                    "This avoids re-running a long-soak condition that already maps to rupture."
+                ),
+                (
+                    "If the 5 min candidate survives with measurable COF, treat post-treatment "
+                    "duration as a likely rupture driver. If it still ruptures, prioritize higher "
+                    "PVA concentration or other matrix-strength changes."
+                ),
+            )
+            rescue_entry["failure_factor_id"] = factor.get("factor_id")
+            rescue_entry["source_conclusion"] = (
+                f"Rescue mirror of failure-factor memory: status={factor.get('status')}, "
+                f"evidence={factor.get('evidence')}"
+            )
+            if not _entry_is_duplicate(rescue_entry, entries):
+                entries.append(rescue_entry)
+            seen_vars.add(variable)
+            if len(entries) >= max_count:
+                break
+            continue
         entry = _entry(
             f"R{round_idx}-{len(entries) + 1:02d}",
             "failure_factor_verification",
@@ -312,7 +468,6 @@ def _verification_entries_from_memory(
 
         if variable == "post_soak_hours" and len(entries) < max_count:
             rescue_value = _post_soak_rescue_value(old_value, new_value)
-            failure_mode = str(factor.get("failure_mode") or "").lower()
             if rescue_value is not None and failure_mode in ("rupture", "break", "broken", "failed", "failure"):
                 rescue_entry = _entry(
                     f"R{round_idx}-{len(entries) + 1:02d}",
@@ -353,7 +508,7 @@ def _choose_additive_variable(parent: Dict[str, Any]) -> str:
 
 
 def _choose_network_or_process_variable(parent: Dict[str, Any]) -> str:
-    for var in ("crosslinker_wt_percent", "freeze_thaw_cycles", "post_soak_hours", "pva_wt_percent"):
+    for var in ("pva_wt_percent", "post_soak_hours", "freeze_thaw_cycles", "crosslinker_wt_percent"):
         val = _value_for_variable(parent, var)
         if val not in (None, "") and str(val) != "0" and str(val) != "0.0":
             return var
@@ -386,6 +541,20 @@ def build_constrained_doe_skeleton(
     parent_obj = read_json(parent_path)
     parents = parent_obj.get("candidates", []) or []
     by_id = _candidate_by_id(parents)
+
+    diagnosis_best_ids: List[str] = []
+    diagnosis_path = out_dir / f"R{source_round}_diagnosis.json"
+    if diagnosis_path.exists():
+        try:
+            diagnosis_obj = read_json(diagnosis_path)
+            diagnosis_best_ids = [
+                str(cid)
+                for cid in (diagnosis_obj.get("best_candidates") or [])
+                if str(cid).strip()
+            ]
+        except Exception:
+            diagnosis_best_ids = []
+
     # ---- Parent selection with mechanical-failure awareness ----
     # Sort candidates by COF (lowest first) so code-layer ranking supplements LLM audit.
     # Results CSV may live in out_dir/ or out_dir/run_state_files/ (newer layout).
@@ -411,11 +580,12 @@ def build_constrained_doe_skeleton(
             pass
 
     def _ranked_parents(ids, by_id, parents_list):
-        """Yield parent dicts in CVS-descending order (best overall viability first).
+        """Yield parent dicts with manual integrity notes ahead of raw CVS.
 
-        CVS naturally penalises mechanical failure through its multiplicative
-        integrity gate I, so failed parents are automatically demoted without
-        needing a separate pass/fail filter.
+        Manual observations can identify spikes, rupture, indentation, or
+        surface damage that make a high-looking trace unreliable. Keep those
+        parents behind clean samples, then use CVS within the same integrity
+        class.
         """
         from pva_work_flow.wetlab.wetlab_outcomes import compute_cvs
 
@@ -427,8 +597,8 @@ def build_constrained_doe_skeleton(
                 if isinstance(_entry, dict) and _entry.get("error_codes"):
                     _error_codes_by_id[_cid] = [str(e) for e in _entry["error_codes"]]
 
-        # Compute CVS for each parent that has COF data
-        _cvs_by_id: dict[str, float] = {}
+        # Compute CVS for each parent that has COF data.
+        _cvs_by_id: dict[str, dict[str, Any]] = {}
         for cid in ids:
             if cid not in by_id:
                 continue
@@ -449,14 +619,17 @@ def build_constrained_doe_skeleton(
                     pass
             if row.get("cof_steady_mean") is not None:
                 ec = _error_codes_by_id.get(cid)
-                _cvs_by_id[cid] = compute_cvs(row, error_codes=ec if ec else None).get("cvs", 0.0)
+                _cvs_by_id[cid] = compute_cvs(row, error_codes=ec if ec else None)
             else:
-                _cvs_by_id[cid] = 0.0  # no COF → bottom
+                _cvs_by_id[cid] = {"cvs": 0.0, "i_multiplier": 0.0}  # no COF -> bottom
 
-        # Sort by CVS descending
+        # Sort by integrity first, then CVS descending.
         sorted_ids = sorted(
             [cid for cid in ids if cid in by_id],
-            key=lambda cid: -_cvs_by_id.get(cid, 0.0),
+            key=lambda cid: (
+                float(_cvs_by_id.get(cid, {}).get("i_multiplier", 0.0)) < 1.0,
+                -float(_cvs_by_id.get(cid, {}).get("cvs", 0.0)),
+            ),
         )
         for cid in sorted_ids:
             yield by_id[cid]
@@ -475,7 +648,13 @@ def build_constrained_doe_skeleton(
             )
         best_parent = by_id[target_parent_id]
     else:
-        _best_iter = _ranked_parents(_audit_best_ids(audit), by_id, parents)
+        ranked_ids: List[str] = []
+        for cid in diagnosis_best_ids + _audit_best_ids(audit):
+            if cid not in ranked_ids:
+                ranked_ids.append(cid)
+        if not ranked_ids:
+            ranked_ids = [p.get("candidate_id", "") for p in parents if p.get("candidate_id")]
+        _best_iter = _ranked_parents(ranked_ids, by_id, parents)
         best_parent = next(_best_iter, parents[0] if parents else {})
     failed_parent = _first_existing(_audit_failed_ids(audit), by_id, parents)
 
@@ -523,33 +702,43 @@ def build_constrained_doe_skeleton(
     )
 
     table: List[Dict[str, Any]] = []
-    verification_entries = _verification_entries_from_memory(out_dir, round_idx, best_parent, n)
+    _all_rupture_source = _round_has_all_rupture(out_dir, source_round)
+    if _all_rupture_source:
+        rupture_entries = _global_rupture_rescue_entries(round_idx, best_parent, n)
+        for entry in rupture_entries:
+            if not _entry_is_duplicate(entry, table):
+                table.append(entry)
+        if rupture_entries:
+            print(
+                f"[DOE] Source R{source_round} was all-rupture; prioritized "
+                f"{len(rupture_entries)} PVA/5min-soak rescue entries."
+            )
+
+    verification_entries = _verification_entries_from_memory(out_dir, round_idx, best_parent, n - len(table))
     if verification_entries:
-        table.extend(verification_entries)
+        for entry in verification_entries:
+            entry["next_id"] = f"R{round_idx}-{len(table) + 1:02d}"
+            if not _entry_is_duplicate(entry, table):
+                table.append(entry)
         print(f"[DOE] Prioritized {len(verification_entries)} failure-factor verification entries from memory.")
 
-    if len(table) < n:
+    allow_generic_fallbacks = not _all_rupture_source
+
+    if allow_generic_fallbacks and len(table) < n:
         if _needs_reinforcement:
-            # Prioritise crosslinker increase to fix mechanical integrity
-            variable = "crosslinker_wt_percent"
+            # Prioritise matrix strength; GA/HCl can be post-gel shrinkage treatment,
+            # so crosslinker loading should not be the default rupture fix.
+            variable = "pva_wt_percent"
             old = _value_for_variable(best_parent, variable)
             if old in (None, "") or str(old) in ("0", "0.0"):
-                # Fall back to PVA increase if no crosslinker wt% available
-                variable = "pva_wt_percent"
+                variable = "freeze_thaw_cycles"
                 old = _value_for_variable(best_parent, variable)
-                direction = "increase"
-                reason_code = "increase_mechanical_integrity"
-                rationale = (
-                    f"Increase PVA concentration to reinforce mechanical integrity "
-                    f"(parent COF={_parent_cof:.4f} is already low but friction is {_parent_friction})."
-                )
-            else:
-                direction = "increase"
-                reason_code = "increase_crosslink_density"
-                rationale = (
-                    f"Increase crosslinker to reinforce network integrity "
-                    f"(parent COF={_parent_cof:.4f} is already low but friction is {_parent_friction})."
-                )
+            direction = "increase"
+            reason_code = "increase_mechanical_integrity"
+            rationale = (
+                f"Increase PVA matrix strength rather than GA/HCl loading "
+                f"(parent COF={_parent_cof:.4f} is already low but friction is {_parent_friction})."
+            )
         else:
             variable = "pva_wt_percent"
             old = _value_for_variable(best_parent, variable)
@@ -562,18 +751,20 @@ def build_constrained_doe_skeleton(
 
         new = _small_step_for_variable(variable, old, direction)
         if old not in (None, "") and new is not None and not _numeric_equivalent(old, new):
-            table.append(
-                _entry(
-                    f"R{round_idx}-{len(table) + 1:02d}",
-                    "single_factor_perturbation",
-                    best_parent,
-                    [_changed(variable, old, new, reason_code)],
-                    rationale,
-                    "COF decreases if lower contact stiffness/higher hydration helps, while gel integrity remains acceptable.",
-                )
+            entry = _entry(
+                f"R{round_idx}-{len(table) + 1:02d}",
+                "single_factor_perturbation",
+                best_parent,
+                [_changed(variable, old, new, reason_code)],
+                rationale,
+                "COF decreases if lower contact stiffness/higher hydration helps, while gel integrity remains acceptable.",
             )
+            if not _entry_is_duplicate(entry, table):
+                table.append(entry)
+            else:
+                print(f"[DOE] Entry 1 fallback ({variable}: {old}->{new}) duplicates existing entry; skipped.")
 
-    if len(table) < n:
+    if allow_generic_fallbacks and len(table) < n:
         variable = _choose_network_or_process_variable(best_parent)
         old = _value_for_variable(best_parent, variable)
         direction = "decrease" if variable in ("crosslinker_wt_percent", "pva_wt_percent") else "increase"
@@ -595,7 +786,7 @@ def build_constrained_doe_skeleton(
             else:
                 print(f"[DOE] Entry 2 ({variable}: {old}->{new}) duplicates existing entry; skipped.")
 
-    if len(table) < n:
+    if allow_generic_fallbacks and len(table) < n:
         variable = _choose_additive_variable(best_parent)
         old = _value_for_variable(best_parent, variable)
         new = _small_step_for_variable(variable, old, "increase") if old not in (None, "") else old
@@ -616,7 +807,7 @@ def build_constrained_doe_skeleton(
             else:
                 print(f"[DOE] Entry 3 ({variable}: {old}->{new}) duplicates existing entry; skipped.")
 
-    if len(table) < n:
+    if allow_generic_fallbacks and len(table) < n:
         variable = "post_soak_hours"
         old = _value_for_variable(best_parent, variable)
         new = _small_step_for_variable(variable, old, "increase") if old not in (None, "") else old
@@ -642,7 +833,7 @@ def build_constrained_doe_skeleton(
                 print(f"[DOE] Entry 4 ({variable}: {old}->{new}) duplicates existing entry; skipped.")
 
     # ---- Entry 5: second single_factor_perturbation (fallback chain, expanded) ----
-    if len(table) < n:
+    if allow_generic_fallbacks and len(table) < n:
         _entry5_vars = (
             "initiator_or_catalyst_wt_percent",
             "crosslinker_wt_percent",
@@ -677,7 +868,7 @@ def build_constrained_doe_skeleton(
             print("[DOE] Entry 5: all fallback variables exhausted or duplicate; skipped.")
 
     # ---- Entry 6: second local_optimization (fallback chain, expanded) ----
-    if len(table) < n:
+    if allow_generic_fallbacks and len(table) < n:
         _entry6_vars = (
             "post_soak_hours",
             "freeze_thaw_cycles",

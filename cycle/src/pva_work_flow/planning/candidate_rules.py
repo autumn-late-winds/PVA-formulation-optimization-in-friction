@@ -395,7 +395,16 @@ def validate_candidate_constraints(
         if parent and new_material_names(candidate, parent):
             errors.append(f"{cid}: single_factor_perturbation introduced new materials outside limited_exploration")
     elif design_type in ("failure_verification", "failure_factor_verification", "failure_rescue_verification"):
-        if len(changed_names) > 1:
+        allowed_coupled_rescue = (
+            design_type == "failure_rescue_verification"
+            and len(changed_names) == 2
+            and {
+                n.rsplit(".", 1)[-1] if "." in n else n
+                for n in changed_names
+            }
+            == {"pva_wt_percent", "post_soak_hours"}
+        )
+        if len(changed_names) > 1 and not allowed_coupled_rescue:
             errors.append(f"{cid}: {design_type} changed {len(changed_names)} variables, max 1")
         if parent and new_material_names(candidate, parent):
             errors.append(f"{cid}: {design_type} introduced new materials outside limited_exploration")

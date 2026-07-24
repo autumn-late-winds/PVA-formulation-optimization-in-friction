@@ -9,6 +9,7 @@ lineage, parent ids, DOE skeletons, or hard rule checks.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -32,7 +33,12 @@ def formulation_rag_enabled() -> bool:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "数据库" / "scripts" / "query_formulation_rag.py").exists():
+            return parent
+    # Legacy layout fallback: pva_work_flow lived directly below repo/src.
+    return here.parents[3]
 
 
 def resolve_formulation_rag_db(db_path: str | Path | None = None) -> Path:
@@ -187,6 +193,11 @@ def _query_rows(
             conn.close()
 
     try:
+        rows.extend(_query_project_experiment_rows(db_path, problem, material_terms, limit))
+    except Exception:
+        pass
+
+    try:
         rows.extend(_query_vector_rows(db_path, problem, material_terms, limit, out_dir))
     except Exception:
         pass
@@ -202,6 +213,96 @@ def _query_rows(
         if len(unique) >= limit:
             break
     return unique
+
+
+def _query_project_experiment_rows(
+    db_path: Path,
+    problem: str,
+    material_terms: list[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return measured project facts in the same shape as literature cases."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_experiment_records'"
+        ).fetchone()
+        if not exists:
+            return []
+        terms = [term for term in [problem, *material_terms] if term]
+        clauses = ["searchable_text LIKE ?" for _ in terms]
+        where = " OR ".join(clauses) if clauses else "1=1"
+        rows = conn.execute(
+            f"""
+            SELECT * FROM project_experiment_records
+            WHERE evidence_type='measured_fact' AND ({where})
+            ORDER BY
+              CASE outcome_status
+                WHEN 'critical_failure' THEN 0
+                WHEN 'permanent_damage' THEN 1
+                WHEN 'measured_with_issues' THEN 2
+                WHEN 'measured' THEN 3
+                ELSE 4
+              END,
+              round_idx DESC,
+              cvs DESC
+            LIMIT ?
+            """,
+            [*(f"%{term}%" for term in terms), max(limit * 20, 100)],
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # Round-robin outcome classes so numerous rupture records do not crowd out
+    # permanent-damage and valid measured controls.
+    buckets: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        buckets.setdefault(str(row["outcome_status"]), []).append(row)
+    status_order = [
+        "permanent_damage", "critical_failure", "measured",
+        "measured_with_issues", "not_tested", "not_measured",
+        "observed_issue_no_numeric_result",
+    ]
+    selected: list[sqlite3.Row] = []
+    while len(selected) < limit:
+        added = False
+        for status in status_order:
+            bucket = buckets.get(status) or []
+            if bucket and len(selected) < limit:
+                selected.append(bucket.pop(0))
+                added = True
+        if not added:
+            break
+
+    output: list[dict[str, Any]] = []
+    for row in selected:
+        rec = dict(row)
+        output.append(
+            {
+                "case_id": rec["record_id"],
+                "source_title": f"Qwen3-14B measured experiment {rec['root_id']} R{rec['round_idx']}",
+                "source_year": 2026,
+                "case_type": f"project_{rec['outcome_status']}",
+                "baseline_formulation": rec.get("parent_candidate_id") or "new root",
+                "optimized_formulation": rec.get("formulation_json") or "",
+                "changed_factor": rec.get("changed_variables_json") or "",
+                "property_targets": "low friction mechanical integrity wear resistance stable contact",
+                "direction": rec.get("outcome_status") or "",
+                "numeric_evidence_json": rec.get("metrics_json") or "{}",
+                "mechanism_or_failure_reason": rec.get("manual_observation") or "",
+                "tradeoff_or_risk": " ".join(json.loads(rec.get("error_codes_json") or "[]")),
+                "optimization_use": (
+                    "Measured project fact. Avoid repeating critical/permanent-damage regions; "
+                    "do not treat low COF as success when integrity failed."
+                ),
+                "evidence_text": rec.get("searchable_text") or "",
+                "source_locator": rec.get("source_files_json") or "",
+                "stage2_score": 100.0,
+                "is_reference_only": 0,
+            }
+        )
+    return output
 
 
 def _fetch_cases_by_id(db_path: Path, case_ids: list[str]) -> list[dict[str, Any]]:

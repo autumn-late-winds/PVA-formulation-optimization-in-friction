@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 
 from pva_work_flow.tree.formula_tree import infer_branch_decisions
 from pva_work_flow.tree.tree_naming import normalize_tree_label
+from pva_work_flow.wetlab.wetlab_outcomes import compute_cvs, has_failure
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -175,19 +176,34 @@ def _summarize_tree_stats(rows: list[dict]) -> list[dict]:
     for tree_id, items in sorted(by_tree.items()):
         cofs = [x["cof"] for x in items if x.get("cof") is not None]
         measured = [x for x in items if x.get("cof") is not None]
+        valid_measured = [x for x in measured if not x.get("experimental_failed")]
+        valid_cofs = [x["cof"] for x in valid_measured]
+        cvs_rows = [x for x in items if x.get("cvs") is not None]
+        best_cvs_row = max(cvs_rows, key=lambda x: x.get("cvs") or 0.0) if cvs_rows else None
         summaries.append(
             {
                 "tree_id": tree_id,
                 "nodes": len(items),
                 "measured_n": len(measured),
+                "valid_measured_n": len(valid_measured),
                 "best_cof": round(min(cofs), 6) if cofs else None,
+                "best_valid_cof": round(min(valid_cofs), 6) if valid_cofs else None,
+                "best_cvs": best_cvs_row.get("cvs") if best_cvs_row else None,
+                "best_cvs_candidate": best_cvs_row.get("candidate_id") if best_cvs_row else None,
+                "best_cvs_grade": best_cvs_row.get("cvs_grade") if best_cvs_row else None,
                 "median_like_cof": round(sorted(cofs)[len(cofs) // 2], 6) if cofs else None,
                 "continue_n": sum(1 for x in items if x.get("branch_status") == "continue"),
                 "rescue_candidate_n": sum(1 for x in items if x.get("branch_status") == "rescue_candidate"),
                 "kill_n": sum(1 for x in items if x.get("branch_status") == "kill"),
             }
         )
-    summaries.sort(key=lambda x: x["best_cof"] if x["best_cof"] is not None else 999)
+    summaries.sort(
+        key=lambda x: (
+            -(x["best_cvs"] or 0.0),
+            x["best_valid_cof"] if x["best_valid_cof"] is not None else 999,
+            x["best_cof"] if x["best_cof"] is not None else 999,
+        )
+    )
     return summaries
 
 
@@ -209,6 +225,7 @@ def build_tree_statistics(out_dir: Path) -> Dict[str, Any]:
         decision = decisions_by_dir.get(artifact_dir, {}).get(cid, {})
         result = results_by_dir.get(artifact_dir, {}).get(cid, {})
         cof = _float_or_none(result.get("cof_steady_mean"))
+        cvs_result = compute_cvs(result, error_codes=decision.get("errors") or None) if result else {}
         row = {
             "artifact_source": source,
             "candidate_id": cid,
@@ -223,6 +240,10 @@ def build_tree_statistics(out_dir: Path) -> Dict[str, Any]:
             "action": decision.get("action"),
             "reason": decision.get("reason"),
             "cof": cof,
+            "experimental_failed": has_failure(result) if result else False,
+            "cvs": cvs_result.get("cvs") if cvs_result else None,
+            "cvs_grade": cvs_result.get("grade") if cvs_result else None,
+            "cvs_i_multiplier": cvs_result.get("i_multiplier") if cvs_result else None,
             "delta_cof": decision.get("delta_cof"),
             "rescue_attempt": decision.get("rescue_attempt", False),
             "friction_pattern": result.get("friction_pattern", ""),
@@ -265,6 +286,9 @@ def build_tree_statistics(out_dir: Path) -> Dict[str, Any]:
         "summary": {
             "candidate_count": len(rows),
             "measured_count": sum(1 for x in rows if x.get("cof") is not None),
+            "valid_measured_count": sum(
+                1 for x in rows if x.get("cof") is not None and not x.get("experimental_failed")
+            ),
             "positive_sample_count": len(positive_samples),
             "negative_sample_count": len(negative_samples),
             "unsafe_factor_count": unsafe_factor_count,
@@ -300,6 +324,7 @@ def tree_statistics_markdown(stats: Dict[str, Any]) -> str:
     for key in [
         "candidate_count",
         "measured_count",
+        "valid_measured_count",
         "positive_sample_count",
         "negative_sample_count",
         "unsafe_factor_count",
@@ -327,11 +352,13 @@ def tree_statistics_markdown(stats: Dict[str, Any]) -> str:
 
     lines.append("")
     lines.append("## Tree Ranking")
-    lines.append("| tree_id | nodes | measured | best_cof | continue | rescue_candidate | kill |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|")
+    lines.append("| tree_id | nodes | measured | valid_measured | best_cvs | best_cvs_candidate | best_valid_cof | raw_best_cof | continue | rescue_candidate | kill |")
+    lines.append("|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|")
     for row in stats.get("tree_stats", [])[:20]:
         lines.append(
             f"| {row['tree_id']} | {row['nodes']} | {row['measured_n']} | "
+            f"{row.get('valid_measured_n')} | {row.get('best_cvs')} | "
+            f"{row.get('best_cvs_candidate')} | {row.get('best_valid_cof')} | "
             f"{row['best_cof']} | {row['continue_n']} | "
             f"{row['rescue_candidate_n']} | {row['kill_n']} |"
         )
@@ -380,7 +407,10 @@ def _write_memory_cards(out_dir: Path, stats: Dict[str, Any]) -> None:
                 "key": row["tree_id"],
                 "evidence": row,
                 "retrieval_text": (
-                    f"tree {row['tree_id']}: best_cof={row['best_cof']}, "
+                    f"tree {row['tree_id']}: best_cvs={row.get('best_cvs')} "
+                    f"({row.get('best_cvs_candidate')}), "
+                    f"best_valid_cof={row.get('best_valid_cof')}, "
+                    f"raw_best_cof={row['best_cof']}, "
                     f"continue={row['continue_n']}, rescue={row['rescue_candidate_n']}, kill={row['kill_n']}"
                 ),
             }
@@ -408,7 +438,7 @@ def build_tree_statistics_context(out_dir: Path, max_variables: int = 6, max_tre
         "Use this as statistical prior only. Do not mix parent lineages within a single tree expansion.",
         (
             f"trees={summary.get('tree_count')}, artifact_dirs={summary.get('artifact_dir_count')}, "
-            f"measured={summary.get('measured_count')}, "
+            f"measured={summary.get('measured_count')}, valid_measured={summary.get('valid_measured_count')}, "
             f"continue={summary.get('continue_count')}, rescue={summary.get('rescue_candidate_count')}, "
             f"kill={summary.get('kill_count')}, rescue_success_rate={summary.get('rescue_success_rate')}"
         ),
@@ -428,7 +458,9 @@ def build_tree_statistics_context(out_dir: Path, max_variables: int = 6, max_tre
         lines.append("Best root trees so far:")
         for row in tree_stats:
             lines.append(
-                f"- {row['tree_id']}: best_cof={row['best_cof']}, nodes={row['nodes']}, "
+                f"- {row['tree_id']}: best_cvs={row.get('best_cvs')} "
+                f"({row.get('best_cvs_candidate')}), best_valid_cof={row.get('best_valid_cof')}, "
+                f"raw_best_cof={row['best_cof']}, nodes={row['nodes']}, "
                 f"continue={row['continue_n']}, kill={row['kill_n']}"
             )
 

@@ -130,12 +130,13 @@ def materialize_constrained_candidates(
         candidate["mutation_rationale"] = entry.get("design_rationale", "")
         for stale_key in ("ratio_planner", "ratio_source", "ratio_rationale"):
             candidate.pop(stale_key, None)
-        candidate["diagnosis_evidence_used"] = candidate.get("diagnosis_evidence_used") or [
+        candidate["diagnosis_evidence_used"] = [
             f"Parent {parent_id} was selected as the best candidate from round {round_idx - 1} "
             f"based on audit analysis and experimental results.",
             f"Constrained DOE skeleton assigns design_type={candidate['design_type']} "
             f"with changes {changed_names or ['none']}.",
         ]
+        candidate["diagnosis_levers_used"] = changed_names
         candidate["expected_mechanism"] = candidate.get("expected_mechanism") or [
             "Code-materialized candidate inherits the parent PVA system and changes only the planned local factor."
         ]
@@ -161,6 +162,8 @@ def materialize_constrained_candidates(
         metadata["design_type"] = candidate["design_type"]
         metadata["planned_changed_variables"] = changed
         metadata["doe_factor_levels"] = candidate["doe_factor_levels"]
+        metadata["diagnosis_evidence_used"] = candidate["diagnosis_evidence_used"]
+        metadata["diagnosis_levers_used"] = candidate["diagnosis_levers_used"]
 
         if candidate["design_type"] == "baseline_reproduction":
             candidate["doe_factor_levels"] = {}

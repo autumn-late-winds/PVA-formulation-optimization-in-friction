@@ -39,6 +39,75 @@ from pva_work_flow.orchestration.workflow import (
 )
 
 
+def _round_rag_evidence(out_dir: Path, round_idx: int) -> list[dict[str, Any]]:
+    """Build compact candidate-level RAG evidence markers when RAG is available.
+
+    These markers record that RAG context was available to the generation/audit
+    loop. They are deliberately conservative: project experimental results and
+    lineage remain the source of truth, and literature/context priors are not
+    represented as direct proof of candidate performance.
+    """
+    evidence: list[dict[str, Any]] = []
+
+    vector_index = out_dir / "rag_vector_index.json"
+    if vector_index.exists():
+        try:
+            obj = read_json(vector_index)
+            doc_count = obj.get("doc_count")
+        except Exception:
+            doc_count = None
+        evidence.append(
+            {
+                "case_id": "local_project_memory_rag",
+                "source_title": "Local project vector RAG",
+                "source_locator": str(vector_index),
+                "claim": (
+                    f"Local project memory RAG was available for R{round_idx}"
+                    + (f" ({doc_count} indexed documents)." if doc_count is not None else ".")
+                ),
+                "optimization_use": (
+                    "Use similar project outcomes and failure notes as supporting context; "
+                    "project experimental results and tree lineage override RAG priors."
+                ),
+            }
+        )
+
+    try:
+        from pva_work_flow.memory.formulation_rag import (
+            build_formulation_rag_context,
+            resolve_formulation_rag_db,
+        )
+
+        db_path = resolve_formulation_rag_db()
+        context = build_formulation_rag_context(
+            out_dir,
+            round_idx,
+            phase=f"R{round_idx} candidate generation",
+            limit=3,
+        )
+        if context:
+            evidence.append(
+                {
+                    "case_id": "external_formulation_literature_rag",
+                    "source_title": db_path.name,
+                    "source_locator": str(db_path),
+                    "claim": f"External formulation-literature RAG returned context for R{round_idx} candidate generation.",
+                    "optimization_use": (
+                        "Use literature priors only to support or challenge mechanisms and risks; "
+                        "do not treat them as project data."
+                    ),
+                }
+            )
+    except Exception:
+        pass
+
+    return evidence
+
+
+def _candidate_has_rag_evidence(candidate: dict) -> bool:
+    return any(candidate.get(key) for key in ("rag_evidence", "rag_evidence_used", "formulation_rag_cases"))
+
+
 def _load_diag_bundle_for_round(out_dir: Path, r: int) -> Dict[str, Any]:
     diag_path = out_dir / f"R{r}_diagnosis.json"
     if not diag_path.exists():
@@ -172,16 +241,28 @@ def build_generator_prompt(
     kpi_lines: list[str] = []
     if kpi_path.exists():
         kpi_log = read_json(kpi_path)
-        kpi_lines.append("KPI HISTORY (COF trend across rounds — lower is better):")
+        kpi_lines.append(
+            "KPI HISTORY (CVS is the parent-ranking metric; best_valid_cof is raw valid COF trend — lower COF is better):"
+        )
         for entry in kpi_log:
             rn = entry.get("round", "?")
-            best = entry.get("best_cof")
+            best = entry.get("best_valid_cof", entry.get("best_cof"))
+            best_cvs = entry.get("best_cvs")
+            best_cid = entry.get("best_candidate_id") or entry.get("best_cvs_candidate")
             pr = entry.get("pass_rate", 0)
             n_entries = entry.get("n", 0)
             best_str = f"{best:.4f}" if best is not None else "N/A"
+            cvs_str = f"{best_cvs:.2f}" if best_cvs is not None else "N/A"
             pr_str = f"{pr:.1%}"
-            kpi_lines.append(f"  R{rn}: best_cof={best_str}, pass_rate={pr_str}, n={n_entries}")
-        cofs = [e.get("best_cof") for e in kpi_log if e.get("best_cof") is not None]
+            kpi_lines.append(
+                f"  R{rn}: best_cvs={cvs_str} ({best_cid or 'unknown'}), "
+                f"best_valid_cof={best_str}, pass_rate={pr_str}, n={n_entries}"
+            )
+        cofs = [
+            e.get("best_valid_cof", e.get("best_cof"))
+            for e in kpi_log
+            if e.get("best_valid_cof", e.get("best_cof")) is not None
+        ]
         if len(cofs) >= 2 and cofs[-1] is not None and cofs[0] is not None and cofs[-1] > cofs[0]:
             kpi_lines.append(f"  WARNING: COF INCREASED from {cofs[0]:.4f} (R1) to {cofs[-1]:.4f} (latest). Optimization is going in the WRONG direction. Reconsider your strategy.")
     kpi_trend = "\n".join(kpi_lines)
@@ -553,13 +634,13 @@ def _auto_generate_risks(c: dict) -> list[str]:
     # Template risks based on chemical features
     if "glutaraldehyde" in mat_names or "glutaraldehyde" in str(formulation).lower():
         risks.append({
-            "risk": "Glutaraldehyde crosslinking may be too fast at high temperature, causing inhomogeneous gel",
-            "mitigation": "Cool solution to 50-55°C before adding crosslinker; mix rapidly and cast immediately",
+            "risk": "GA post-gel treatment may over-shrink the hydrogel and increase rupture risk",
+            "mitigation": "Use a short 5 min post-gel treatment first; avoid interpreting GA as required gelation chemistry",
         })
     if "hcl" in mat_names or "hcl" in str(formulation).lower():
         risks.append({
-            "risk": "HCl catalyst may cause premature gelation or pH-induced polymer degradation",
-            "mitigation": "Use minimal HCl concentration (0.02-0.15 wt%); monitor pH during mixing",
+            "risk": "HCl in post-treatment may accelerate shrinkage or acid damage if exposure is too long",
+            "mitigation": "Keep exposure short, rinse consistently, and compare volume/shape before tribology testing",
         })
     if "freeze" in str(processing).lower() or _processing_int(processing.get("freeze_thaw_cycles")) > 0:
         risks.append({
@@ -597,7 +678,7 @@ def _auto_generate_risks(c: dict) -> list[str]:
     if len(risks) < 2:
         risks.append({
             "risk": "Post-soak time may affect surface hydration and friction stability",
-            "mitigation": "Standardize post-soak to 1-2h; measure COF immediately after soak vs after extended soaking",
+            "mitigation": "After rupture, standardize a 5 min post-treatment/soak before testing longer exposure windows",
         })
 
     c["risks_and_mitigations"] = risks
@@ -690,8 +771,8 @@ def _auto_generate_expected_mechanism(c: dict) -> list[str]:
     # Crosslinker-specific mechanisms
     if "glutaraldehyde" in mat_names or "glutaraldehyde" in str(formulation).lower():
         new_mechanisms.append(
-            "Glutaraldehyde crosslinks PVA hydroxyl groups via acetal bridges, "
-            "forming a chemically stable network that resists dissolution under aqueous lubrication"
+            "A short GA post-gel treatment may reduce PVA hydrogel volume and alter surface hydration; "
+            "it is not required for gelation in this workflow"
         )
     if "borax" in mat_names or "borax" in str(formulation).lower():
         new_mechanisms.append(
@@ -773,11 +854,11 @@ def _auto_generate_expected_mechanism(c: dict) -> list[str]:
                 "with higher water content, favoring fluid-film lubrication"
             )
 
-    # HCl catalyst
+    # HCl post-treatment acid
     if "hcl" in mat_names or "hydrochloric" in mat_names:
         new_mechanisms.append(
-            "HCl catalyzes the acetalization reaction between glutaraldehyde and PVA, "
-            "enabling rapid gelation at moderate temperatures"
+            "HCl can act as the acid component of a GA/HCl post-gel shrinkage treatment; "
+            "short exposure helps separate volume-control effects from rupture risk"
         )
 
     # Generic fallback (always relevant)
@@ -937,6 +1018,8 @@ def run_generator(
                 if pc.get("candidate_id")
             }
 
+    round_rag_evidence = _round_rag_evidence(out_dir, round_idx)
+
     filtered_cands: List[Dict[str, Any]] = []
     for c in cands:
 
@@ -990,6 +1073,19 @@ def run_generator(
         c.setdefault("diagnosis_evidence_used", [])
         c.setdefault("mutation_rationale", "")
         c.setdefault("diagnosis_levers_used", [])
+        if not c.get("diagnosis_levers_used"):
+            planned_levers = [
+                item.get("variable")
+                for item in (c.get("planned_changed_variables") or [])
+                if isinstance(item, dict) and item.get("variable")
+            ]
+            changed_levers = c.get("changed_variable_names") or []
+            doe_levers = list((c.get("doe_factor_levels") or c.get("doe_factor_levels_used") or {}).keys())
+            c["diagnosis_levers_used"] = [
+                str(x)
+                for x in dict.fromkeys([*planned_levers, *changed_levers, *doe_levers])
+                if x
+            ]
 
         # ---- Auto-populate diagnosis_evidence_used if empty (14B often leaves it blank) ----
         if not c.get("diagnosis_evidence_used") and c.get("parent_candidate_id"):
@@ -1048,6 +1144,22 @@ def run_generator(
         c["iteration_metadata"]["doe_factor_levels"] = c.get("doe_factor_levels")
         c["iteration_metadata"]["is_extension"] = c.get("is_extension")
         c["iteration_metadata"]["extension_reason"] = c.get("extension_reason")
+
+        if round_rag_evidence and not _candidate_has_rag_evidence(c):
+            candidate_vars = c.get("changed_variable_names") or [
+                item.get("variable")
+                for item in (c.get("planned_changed_variables") or [])
+                if isinstance(item, dict) and item.get("variable")
+            ]
+            c["rag_evidence"] = [
+                {
+                    **item,
+                    "candidate_scope": c.get("candidate_id"),
+                    "changed_variables": candidate_vars,
+                }
+                for item in round_rag_evidence
+            ]
+            c["iteration_metadata"]["rag_evidence"] = c["rag_evidence"]
 
         formulation = c.get("formulation", {}) or {}
         additives = formulation.get("additives", []) or []
@@ -1131,7 +1243,7 @@ def run_generator(
         if soak > 2 and ft == 0:
             corrections.append(
                 f"post_soak={soak}h with freeze_thaw=0: thin film may over-swell and rupture. "
-                f"Consider reducing soak to 0.25-1h for screening."
+                f"After rupture, reduce soak/post-treatment to 0.083h (5min) before testing longer windows."
             )
         if ft > 3:
             p["freeze_thaw_cycles"] = 3

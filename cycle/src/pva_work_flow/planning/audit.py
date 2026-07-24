@@ -139,14 +139,9 @@ def _check_chemical_feasibility(c: dict) -> List[str]:
                     f"PVA dissolution at {temp}°C is too low; requires 80-95°C."
                 )
 
-    # ---- Rule 2: Glutaraldehyde requires acidic catalyst (HCl) ----
-    if "glutaraldehyde" in text_blob or "glut" in text_blob:
-        has_acid = _has_material("hcl") or _has_material("acid") or "acid" in text_blob
-        if not has_acid:
-            failures.append(
-                "Glutaraldehyde crosslinking requires acidic catalyst (HCl). "
-                "No acid or HCl found in materials or mechanisms."
-            )
+    # ---- Rule 2: GA/HCl treatment is optional in the current PVA route ----
+    # PVA can gel without GA/HCl here; when present after gelation, GA/HCl is treated
+    # as a post-gel shrinkage treatment rather than a required gelation crosslinker.
 
     # ---- Rule 3: Borax crosslinking is pH-sensitive ----
     if "borax" in text_blob or "borate" in text_blob or "硼砂" in text_blob:
@@ -185,7 +180,7 @@ def _check_chemical_feasibility(c: dict) -> List[str]:
             )
 
     # ---- Rule 6: Dual crosslinking without justification ----
-    has_chemical_xl = any(k in text_blob for k in ("chemical crosslink", "covalent", "glutaraldehyde"))
+    has_chemical_xl = any(k in text_blob for k in ("chemical crosslink", "covalent"))
     has_photo_xl = any(k in text_blob for k in ("photo", "uv cure", "光固化"))
     if has_chemical_xl and has_photo_xl:
         notes = (c.get("notes") or "").lower()
@@ -299,18 +294,16 @@ def _norm_network(net: str) -> str:
 
 # Crosslinker name aliases: map Chinese/abbreviated names to canonical English names
 _CL_ALIASES: dict[str, str] = {
-    "glutaraldehyde": "glutaraldehyde", "glut": "glutaraldehyde",
     "borax": "borax",
     "pegda": "pegda",
     "mbaa": "mbaa", "bisacrylamide": "mbaa", "bis": "mbaa",
     "genipin": "genipin",
     "citric": "citric_acid", "citric_acid": "citric_acid",
-    "ga": "glutaraldehyde",
 }
 # Priority: higher = more likely to be the actual crosslinker (disambiguates monomer vs crosslinker)
 _CL_PRIORITY: dict[str, int] = {
     "mbaa": 10, "bisacrylamide": 10,
-    "glutaraldehyde": 8, "borax": 8,
+    "borax": 8,
     "pegda": 7, "genipin": 7,
     "citric_acid": 5, "acrylamide": 1,
 }
@@ -319,13 +312,14 @@ _CL_PRIORITY: dict[str, int] = {
 def _norm_crosslinker(name: str) -> str:
     """Normalize crosslinker name to canonical form, handling Chinese/English variants."""
     name_lower = name.strip().lower()
-    # Check if any Chinese GA variants
+    # GA/HCl are treated as optional post-gel shrinkage treatment in this PVA route,
+    # not as the default gelation crosslinker/catalyst pair.
     if any(kw in name_lower for kw in ("戊二醛", "glutaraldehyde", "glut")):
-        return "glutaraldehyde"
+        return "none"
+    if any(kw in name_lower for kw in ("盐酸", "hcl", "hydrochloric")):
+        return "none"
     if any(kw in name_lower for kw in ("硼砂", "borax")):
         return "borax"
-    if any(kw in name_lower for kw in ("盐酸", "hcl")):
-        return "hcl"
     # Check alias table
     for alias, canonical in _CL_ALIASES.items():
         if alias in name_lower:
@@ -364,7 +358,7 @@ def _infer_crosslinker_from_materials(parent: dict) -> str:
     # Fallback: check method string
     method = (f.get("crosslink_or_phys_method") or "").lower()
     if "ga" in method or "glutar" in method or "戊二醛" in method:
-        return "glutaraldehyde"
+        return "none"
     if "borax" in method or "硼砂" in method:
         return "borax"
     if "photo" in method or "uv" in method:

@@ -114,31 +114,62 @@ def aggregate_cof_from_row(r: Dict[str, str]) -> Tuple[float | None, float | Non
     return mean_single, std_single
 
 
-def compute_kpis(results_rows: List[Dict[str, str]]) -> Dict[str, Any]:
-    best = None
+def compute_kpis(
+    results_rows: List[Dict[str, str]],
+    error_codes_by_id: Dict[str, List[str]] | None = None,
+) -> Dict[str, Any]:
+    """Compute round-level KPI trends with explicit ranking semantics.
+
+    ``best_valid_cof`` is the lowest COF among candidates without wet-lab
+    failure signals. ``best_cvs`` is the highest composite viability score and
+    should be used for parent/formula ranking because it includes mechanical
+    integrity, COF, wear/modulus, and friction stability.
+
+    ``best_cof`` is kept as a backwards-compatible alias for
+    ``best_valid_cof``; new code should prefer the explicit field names.
+    """
+    from pva_work_flow.wetlab.wetlab_outcomes import compute_cvs, has_failure
+
+    best_valid_cof = None
+    best_valid_cof_candidate = None
+    best_cvs = None
+    best_cvs_candidate = None
+    best_cvs_grade = "F"
     ok_count = 0
     n = 0
+    measured_valid_count = 0
+    failed_count = 0
+    error_codes_by_id = error_codes_by_id or {}
 
     for r in results_rows:
-        notes = (r.get("notes") or "").strip().upper()
         failure = (r.get("failure_type") or "none").strip().lower()
-
-        cof_raw = (r.get("cof_steady_mean") or "").strip()
-        is_error1 = ("ERROR1" in notes) or (cof_raw.upper() == "ERROR1")
-        is_error2 = ("ERROR2" in notes) or (cof_raw.upper() == "ERROR2")
-
-        if is_error1 or is_error2:
-            n += 1
-            continue
+        cid = (r.get("candidate_id") or "").strip()
+        explicit_error_codes = error_codes_by_id.get(cid, [])
+        failed = bool(explicit_error_codes) or has_failure(r)
+        if failed:
+            failed_count += 1
 
         cof, std = aggregate_cof_from_row(r)
-        if cof is None:
+        if cof is None and not failed:
             continue
         if std is None:
             std = 0.0
 
         n += 1
-        best = cof if best is None else min(best, cof)
+        cvs_result = compute_cvs(r, error_codes=explicit_error_codes or None)
+        cvs = float(cvs_result.get("cvs") or 0.0)
+        if best_cvs is None or cvs > best_cvs:
+            best_cvs = cvs
+            best_cvs_candidate = cid or None
+            best_cvs_grade = str(cvs_result.get("grade") or "F")
+
+        if failed or cof is None:
+            continue
+
+        measured_valid_count += 1
+        if best_valid_cof is None or cof < best_valid_cof:
+            best_valid_cof = cof
+            best_valid_cof_candidate = cid or None
 
         pass_one = (cof <= ACCEPTANCE["cof_steady_max"]) and (std <= ACCEPTANCE["cof_std_max"])
         if ACCEPTANCE["no_failure"] and failure not in ("none", "", "na"):
@@ -148,6 +179,16 @@ def compute_kpis(results_rows: List[Dict[str, str]]) -> Dict[str, Any]:
 
     return {
         "n": n,
-        "best_cof": best,
+        "measured_valid_count": measured_valid_count,
+        "failed_count": failed_count,
+        "best_valid_cof": best_valid_cof,
+        "best_valid_cof_candidate": best_valid_cof_candidate,
+        "best_cvs": best_cvs,
+        "best_cvs_candidate": best_cvs_candidate,
+        "best_cvs_grade": best_cvs_grade,
+        "ranking_metric": "cvs_with_integrity_gate",
+        "best_cof": best_valid_cof,
+        "best_candidate_id": best_cvs_candidate,
         "pass_rate": (ok_count / n) if n else 0.0,
+        "failure_rate": (failed_count / n) if n else 0.0,
     }

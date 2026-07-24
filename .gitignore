@@ -24,6 +24,7 @@ env/
 # Local experiment outputs and generated artifacts
 cycle/src/sft_qwen3_14b_out/
 cycle/src/**/sft_*_out/
+cycle/src/sft_qwen3_14b_out_old/
 smoke_test_runs/
 
 # Local databases and large research assets
