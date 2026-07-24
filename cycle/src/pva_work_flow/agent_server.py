@@ -436,6 +436,12 @@ DASHBOARD_HTML = r"""<!doctype html>
     .muted { color: var(--muted); font-size: 13px; line-height: 1.45; }
     .sources { display: grid; gap: 6px; margin-top: 10px; }
     .source { padding: 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 12px; color: var(--muted); }
+    .loop { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .loop-step { position: relative; min-height: 102px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #f8faf7; }
+    .loop-step strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .loop-step span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .loop-step.current { border-color: var(--accent); background: var(--soft); }
+    .loop-step.current::after { content: "NEXT"; position: absolute; top: 9px; right: 9px; color: var(--accent); font-size: 10px; font-weight: 700; }
     button {
       border: 1px solid var(--accent);
       background: var(--accent);
@@ -496,6 +502,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     @media (max-width: 900px) {
       main, .grid2 { grid-template-columns: 1fr; }
       input { min-width: 100%; }
+      .loop { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -610,7 +617,15 @@ DASHBOARD_HTML = r"""<!doctype html>
 
     function renderRounds(items) {
       if (!items.length) {
-        rounds.innerHTML = "<p>No rounds found.</p>";
+        rounds.innerHTML = `<p class="muted">Virtual workflow preview — it will be replaced by your real run data after the first iteration.</p>
+          <div class="loop">
+            <div class="loop-step current"><strong>01 · Define target</strong><span>Set friction, modulus, materials and process constraints.</span></div>
+            <div class="loop-step"><strong>02 · Generate candidates</strong><span>Qwen proposes constrained formulations and rationale.</span></div>
+            <div class="loop-step"><strong>03 · Audit &amp; prepare</strong><span>Check feasibility, export DOE and result templates.</span></div>
+            <div class="loop-step"><strong>04 · Wet-lab test</strong><span>Collect friction and compression measurements.</span></div>
+            <div class="loop-step"><strong>05 · Diagnose evidence</strong><span>Analyze CSVs, failures and candidate trade-offs.</span></div>
+            <div class="loop-step"><strong>06 · Iterate or validate</strong><span>Feed evidence into the next round or verify convergence.</span></div>
+          </div>`;
         return;
       }
       const rows = items.map(r => `<tr>
