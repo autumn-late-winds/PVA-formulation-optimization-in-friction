@@ -442,6 +442,14 @@ DASHBOARD_HTML = r"""<!doctype html>
     .loop-step span { color: var(--muted); font-size: 12px; line-height: 1.35; }
     .loop-step.current { border-color: var(--accent); background: var(--soft); }
     .loop-step.current::after { content: "NEXT"; position: absolute; top: 9px; right: 9px; color: var(--accent); font-size: 10px; font-weight: 700; }
+    .demo-heading { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin: 14px 0 8px; }
+    .demo-heading strong { font-size: 13px; }
+    .demo-tag { color: var(--accent-2); font-size: 11px; font-weight: 700; }
+    .formula-demo { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .formula-card { padding: 11px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    .formula-card strong { display: block; font-size: 13px; }
+    .formula-card p { margin: 7px 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .formula-card small { color: var(--accent); font-size: 11px; font-weight: 700; }
     button {
       border: 1px solid var(--accent);
       background: var(--accent);
@@ -503,6 +511,7 @@ DASHBOARD_HTML = r"""<!doctype html>
       main, .grid2 { grid-template-columns: 1fr; }
       input { min-width: 100%; }
       .loop { grid-template-columns: 1fr 1fr; }
+      .formula-demo { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -625,6 +634,12 @@ DASHBOARD_HTML = r"""<!doctype html>
             <div class="loop-step"><strong>04 · Wet-lab test</strong><span>Collect friction and compression measurements.</span></div>
             <div class="loop-step"><strong>05 · Diagnose evidence</strong><span>Analyze CSVs, failures and candidate trade-offs.</span></div>
             <div class="loop-step"><strong>06 · Iterate or validate</strong><span>Feed evidence into the next round or verify convergence.</span></div>
+          </div>
+          <div class="demo-heading"><strong>Candidate formulation preview</strong><span class="demo-tag">DEMO ONLY · NOT PROJECT DATA</span></div>
+          <div class="formula-demo">
+            <article class="formula-card"><strong>Demo-A</strong><p>PVA 10.0 wt% · glycerol 2.0 wt%<br>Freeze–thaw: 2 cycles</p><small>Screening candidate</small></article>
+            <article class="formula-card"><strong>Demo-B</strong><p>PVA 12.0 wt% · citrate 0.5 wt%<br>Freeze–thaw: 3 cycles</p><small>Audit pending</small></article>
+            <article class="formula-card"><strong>Demo-C</strong><p>PVA 11.0 wt% · PEG 1.0 wt%<br>Freeze–thaw: 1 cycle</p><small>Comparison candidate</small></article>
           </div>`;
         return;
       }
