@@ -92,6 +92,10 @@ python -m pva_work_flow.cli --out_dir run_out --status
 
 ## Local web console
 
+![PVA Formulation Lab web console preview](assets/web-console-preview.png)
+
+*Web console preview. The formulations, Q&A response, and citations shown above are fictional demonstration content, not project data.*
+
 Run the local web console to work through project questions and formulation iterations in a browser. Start the fine-tuned Qwen 14B vLLM server first, then configure the console to use its OpenAI-compatible endpoint:
 
 ```bash
