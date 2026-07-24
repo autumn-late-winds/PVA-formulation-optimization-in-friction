@@ -4,6 +4,23 @@ An LLM-assisted, closed-loop workflow for optimizing poly(vinyl alcohol) (PVA) h
 
 > This is a research workflow. Generated formulations and recommendations must be reviewed and validated experimentally before use.
 
+## How the workflow works
+
+```mermaid
+flowchart LR
+    A[Formulation constraints<br/>materials & target metrics] --> B[Candidate generation<br/>LLM + constrained DoE]
+    C[Experiment and literature memory<br/>RAG] --> B
+    B --> D[Candidate audit<br/>composition & process checks]
+    D --> E[Wet-lab experiment<br/>friction & compression tests]
+    E --> F[Measurement processing<br/>Bruker CSV → metrics]
+    F --> G[Diagnosis and reports<br/>failure analysis & tree memory]
+    G --> H{Converged?}
+    H -- No --> B
+    H -- Yes --> I[Validated formulation<br/>and verification plan]
+```
+
+The loop preserves each round's formulation, measurements, audit results, and rationale so the next experiment is traceable to the evidence that motivated it.
+
 ## What it does
 
 - Generates constrained PVA hydrogel formulation candidates.
