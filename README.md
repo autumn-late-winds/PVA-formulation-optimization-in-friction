@@ -2,6 +2,10 @@
 
 An LLM-assisted, closed-loop workflow for optimizing poly(vinyl alcohol) (PVA) hydrogel formulations for low-friction applications. The project turns formulation constraints, tribology measurements, and experimental observations into traceable candidate formulations and the next-round wet-lab plan.
 
+![PVA Formulation Lab web console preview](assets/web-console-preview.png)
+
+*Web console preview. The formulations, Q&A response, and citations shown above are fictional demonstration content, not project data.*
+
 > This is a research workflow. Generated formulations and recommendations must be reviewed and validated experimentally before use.
 
 ## How the workflow works
@@ -91,10 +95,6 @@ python -m pva_work_flow.cli --out_dir run_out --status
 ```
 
 ## Local web console
-
-![PVA Formulation Lab web console preview](assets/web-console-preview.png)
-
-*Web console preview. The formulations, Q&A response, and citations shown above are fictional demonstration content, not project data.*
 
 Run the local web console to work through project questions and formulation iterations in a browser. Start the fine-tuned Qwen 14B vLLM server first, then configure the console to use its OpenAI-compatible endpoint:
 
